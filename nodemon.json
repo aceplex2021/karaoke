@@ -1,0 +1,9 @@
+{
+  "watch": ["src/server"],
+  "ext": "ts,js,json",
+  "ignore": ["src/server/**/*.test.ts", "node_modules"],
+  "exec": "tsx src/server/index.ts",
+  "delay": 1000,
+  "signal": "SIGTERM"
+}
+
