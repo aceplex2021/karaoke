@@ -431,13 +431,20 @@ export class QueueManager {
    * Get current playing song for a room
    */
   static async getCurrentSong(roomId: string): Promise<QueueItem | null> {
-    const { data: room } = await supabaseAdmin
+    console.log(`[getCurrentSong] Called for room ${roomId}`);
+    const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
       .select('current_entry_id')
       .eq('id', roomId)
       .single();
 
+    console.log(`[getCurrentSong] Room query:`, {
+      current_entry_id: room?.current_entry_id,
+      error: roomError ? { message: roomError.message, code: roomError.code } : null
+    });
+
     if (!room?.current_entry_id) {
+      console.log(`[getCurrentSong] No current_entry_id for room ${roomId}`);
       return null;
     }
 
@@ -454,10 +461,20 @@ export class QueueManager {
       .eq('status', 'playing')
       .single();
 
+    console.log(`[getCurrentSong] Queue item query:`, {
+      entryId: room.current_entry_id,
+      found: !!queueItem,
+      error: error ? { message: error.message, code: error.code, details: error.details, hint: error.hint } : null,
+      hasSong: !!queueItem?.song,
+      hasUser: !!queueItem?.user
+    });
+
     if (error || !queueItem) {
+      console.log(`[getCurrentSong] Returning null - error or not found`);
       return null;
     }
 
+    console.log(`[getCurrentSong] Returning queue item:`, queueItem.id);
     return queueItem as QueueItem;
   }
 
