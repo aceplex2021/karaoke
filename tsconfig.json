@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "lib": [
-      "ES2022"
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
     ],
     "moduleResolution": "node",
     "resolveJsonModule": true,
@@ -34,6 +36,9 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "scripts",
+    "src/server/index.ts",
+    "src/server/routes"
   ]
 }

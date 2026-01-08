@@ -1,6 +1,5 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
+// Next.js automatically loads .env.local, .env, etc.
+// No need for dotenv.config() in Next.js API routes
 
 export const config = {
   supabase: {
@@ -10,11 +9,6 @@ export const config = {
   },
   mediaServer: {
     baseUrl: process.env.MEDIA_SERVER_URL || 'http://media.local/karaoke/videos',
-  },
-  server: {
-    // Backend always uses port 3001 (frontend uses 3000)
-    port: parseInt(process.env.BACKEND_PORT || process.env.PORT || '3001', 10),
-    nodeEnv: process.env.NODE_ENV || 'development',
   },
 };
 

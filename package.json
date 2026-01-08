@@ -4,38 +4,25 @@
   "description": "Web-only karaoke system for house parties",
   "type": "module",
   "scripts": {
-    "predev": "powershell -ExecutionPolicy Bypass -File ./scripts/kill-port.ps1",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cross-env PORT=3001 BACKEND_PORT=3001 nodemon",
-    "dev:frontend": "cross-env PORT=3000 next dev -H 0.0.0.0 -p 3000",
-    "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "tsc --project tsconfig.backend.json",
-    "build:frontend": "next build",
-    "start": "node dist/server/index.js",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
     "uuid": "^9.0.1",
     "next": "^14.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/cors": "^2.8.17",
     "@types/node": "^20.10.6",
     "@types/uuid": "^9.0.7",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.3.3",
-    "tsx": "^4.7.0",
-    "concurrently": "^8.2.2",
-    "cross-env": "^7.0.3",
-    "nodemon": "^3.0.3"
+    "dotenv": "^16.3.1"
   }
 }
 

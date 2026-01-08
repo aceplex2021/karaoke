@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import type { ReorderQueueRequest } from '@/shared/types';
@@ -17,7 +17,7 @@ import type { Room, QueueItem } from '@/shared/types';
  * 3. Plays the URL from currentSong
  * 4. Reports ended/error to backend
  */
-export default function TVModePage() {
+function TVModePageContent() {
   const searchParams = useSearchParams();
   const roomIdParam = searchParams.get('roomId');
   
@@ -815,5 +815,13 @@ export default function TVModePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function TVModePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <TVModePageContent />
+    </Suspense>
   );
 }

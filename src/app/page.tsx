@@ -29,9 +29,11 @@ export default function HomePage() {
         host_display_name: displayName || 'Host',
       });
 
-      // Store room ID in localStorage for persistence
-      localStorage.setItem('tv_room_id', room.id);
-      localStorage.setItem('tv_user_id', room.host_id || '');
+      // Store room ID in localStorage for persistence (client-side only)
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('tv_room_id', room.id);
+        window.localStorage.setItem('tv_user_id', room.host_id || '');
+      }
 
       router.push(`/tv?roomId=${room.id}`);
     } catch (err: any) {

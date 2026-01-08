@@ -170,7 +170,7 @@ export const api = {
     userId: string,
     songId: string
   ): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/${queueItemId}/complete`, {
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ room_id: roomId, user_id: userId, song_id: songId }),
@@ -179,7 +179,7 @@ export const api = {
   },
 
   async skipSong(queueItemId: string, roomId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/${queueItemId}/skip`, {
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}/skip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ room_id: roomId }),
@@ -188,7 +188,7 @@ export const api = {
   },
 
   async removeFromQueue(queueItemId: string, roomId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/${queueItemId}?room_id=${roomId}`, {
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}?room_id=${roomId}`, {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to remove from queue');
