@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as AddToQueueRequest;
     const { room_id, song_id, version_id, user_id } = body;
 
+    console.log('[queue/add] Request body:', { room_id, song_id, version_id, user_id });
+
     if (!room_id || !user_id) {
+      console.error('[queue/add] Missing required fields:', { room_id, user_id });
       return NextResponse.json(
         { error: 'room_id and user_id are required' },
         { status: 400 }
@@ -50,7 +53,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log('[queue/add] Adding to queue:', { room_id, targetSongId, user_id, version_id });
     const queueItem = await QueueManager.addToQueue(room_id, targetSongId, user_id, version_id);
+    console.log('[queue/add] Queue item created:', queueItem.id);
+    console.log('[queue/add] ensurePlaying should have been called by addToQueue');
 
     // Fetch with joined data
     const { data: fullItem, error } = await supabaseAdmin
@@ -109,10 +115,16 @@ export async function POST(request: NextRequest) {
       (fullItem as any).song.media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
     }
 
+    console.log('[queue/add] Successfully added queue item:', fullItem.id);
     return NextResponse.json({ queueItem: fullItem as QueueItem });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    console.error('Error adding to queue:', error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[queue/add] Error adding to queue:', {
+      message: errorMessage,
+      stack: errorStack,
+      error
+    });
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }

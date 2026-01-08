@@ -85,6 +85,7 @@ export class QueueManager {
    * Phase B: Uses last_singer_id cursor instead of deriving from current_entry_id
    */
   static async selectNextSong(roomId: string): Promise<QueueItem | null> {
+    console.log(`[selectNextSong] Called for room ${roomId}`);
     // Get all pending items
     const { data: pendingItems, error } = await supabaseAdmin
       .from('kara_queue')
@@ -98,6 +99,12 @@ export class QueueManager {
       .eq('room_id', roomId)
       .eq('status', 'pending')
       .order('position', { ascending: true });
+
+    console.log(`[selectNextSong] Query result:`, { 
+      error: error ? { message: error.message, code: error.code } : null,
+      pendingCount: pendingItems?.length || 0,
+      pendingIds: pendingItems?.map((item: any) => item.id) || []
+    });
 
     if (error || !pendingItems || pendingItems.length === 0) {
       return null;
@@ -167,6 +174,7 @@ export class QueueManager {
    * Uses PostgreSQL function with advisory lock for serialization
    */
   static async startPlaying(roomId: string, queueItemId: string): Promise<QueueItem> {
+    console.log(`[startPlaying] Called for room ${roomId}, queueItem ${queueItemId}`);
     // Use PostgreSQL function for atomic start
     // Note: Supabase RPC requires parameters in the exact order defined in the function
     // Function signature: start_playback(p_room_id UUID, p_entry_id UUID)
@@ -174,6 +182,8 @@ export class QueueManager {
       p_room_id: roomId,
       p_entry_id: queueItemId,
     });
+    
+    console.log(`[startPlaying] RPC result:`, { data, error: error ? { message: error.message, code: error.code, details: error.details } : null });
 
     if (error) {
       // Check if it's a constraint violation (another entry already playing)
@@ -217,6 +227,7 @@ export class QueueManager {
    * Goal: room never stays idle if pending exists
    */
   static async ensurePlaying(roomId: string): Promise<void> {
+    console.log(`[ensurePlaying] Called for room ${roomId}`);
     try {
       // Check if room already has a playing entry
       const { data: room } = await supabaseAdmin
@@ -224,6 +235,8 @@ export class QueueManager {
         .select('current_entry_id')
         .eq('id', roomId)
         .single();
+
+      console.log(`[ensurePlaying] Room current_entry_id:`, room?.current_entry_id);
 
       if (room?.current_entry_id) {
         // Verify the entry is actually playing (not stale)
@@ -271,14 +284,23 @@ export class QueueManager {
       }
 
       // Room is idle, select and start next song
+      console.log(`[ensurePlaying] Room is idle, selecting next song...`);
       const nextSong = await this.selectNextSong(roomId);
+      console.log(`[ensurePlaying] selectNextSong returned:`, nextSong ? { id: nextSong.id, title: nextSong.song?.title } : null);
       if (nextSong) {
-        console.log(`Self-healing: Starting next song for room ${roomId}:`, nextSong.song?.title);
+        console.log(`[ensurePlaying] Starting next song for room ${roomId}:`, nextSong.song?.title);
         await this.startPlaying(roomId, nextSong.id);
+        console.log(`[ensurePlaying] startPlaying completed for room ${roomId}`);
+      } else {
+        console.log(`[ensurePlaying] No pending songs found for room ${roomId}`);
       }
     } catch (error: any) {
       // Log but don't throw - self-healing should be best-effort
-      console.error(`Self-healing failed for room ${roomId}:`, error.message);
+      console.error(`[ensurePlaying] Self-healing failed for room ${roomId}:`, {
+        message: error.message,
+        stack: error.stack,
+        error: error
+      });
     }
   }
 
