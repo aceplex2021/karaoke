@@ -24,6 +24,12 @@ export async function GET(
       .eq('id', roomId)
       .single();
 
+    console.log(`[state] Room query for ${roomId}:`, {
+      found: !!room,
+      current_entry_id: room?.current_entry_id,
+      error: roomError ? { message: roomError.message, code: roomError.code } : null
+    });
+
     if (roomError || !room) {
       return NextResponse.json(
         { error: 'Room not found' },
@@ -33,6 +39,7 @@ export async function GET(
 
     // Fetch current song (if any) - this is the playing item
     const currentSong = await QueueManager.getCurrentSong(roomId);
+    console.log(`[state] getCurrentSong returned:`, currentSong ? { id: currentSong.id, status: currentSong.status } : null);
 
     // Fetch queue (pending only, ledger order) - exclude playing to avoid duplicates
     const { data: queueItems, error: queueError } = await supabaseAdmin
