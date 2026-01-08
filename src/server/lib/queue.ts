@@ -240,11 +240,19 @@ export class QueueManager {
 
       if (room?.current_entry_id) {
         // Verify the entry is actually playing (not stale)
-        const { data: queueEntry } = await supabaseAdmin
+        const { data: queueEntry, error: queueEntryError } = await supabaseAdmin
           .from('kara_queue')
           .select('status, started_at')
           .eq('id', room.current_entry_id)
           .single();
+
+        console.log(`[ensurePlaying] Queue entry check:`, {
+          entryId: room.current_entry_id,
+          found: !!queueEntry,
+          status: queueEntry?.status,
+          started_at: queueEntry?.started_at,
+          error: queueEntryError ? { message: queueEntryError.message, code: queueEntryError.code } : null
+        });
 
         // If entry exists and is playing, room is active
         if (queueEntry && queueEntry.status === 'playing') {
@@ -266,15 +274,17 @@ export class QueueManager {
               // Fall through to start next song
             } else {
               // Entry is valid and recent, room is playing
+              console.log(`[ensurePlaying] Room is already playing (entry ${room.current_entry_id} started at ${queueEntry.started_at}), skipping`);
               return;
             }
           } else {
             // Entry is playing but has no started_at (shouldn't happen, but handle it)
+            console.log(`[ensurePlaying] Entry is playing but has no started_at, skipping`);
             return;
           }
         } else {
           // current_entry_id points to non-playing entry (stale pointer)
-          console.log(`Stale current_entry_id detected for room ${roomId}, clearing...`);
+          console.log(`[ensurePlaying] Stale current_entry_id detected for room ${roomId} (entry status: ${queueEntry?.status || 'not found'}), clearing...`);
           await supabaseAdmin
             .from('kara_rooms')
             .update({ current_entry_id: null })
