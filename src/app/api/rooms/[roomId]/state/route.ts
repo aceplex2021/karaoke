@@ -4,6 +4,9 @@ import { QueueManager } from '@/server/lib/queue';
 import { resolveMediaUrlsForQueue } from '@/server/lib/media-url-resolver';
 import type { RoomState, QueueItem, Room } from '@/shared/types';
 
+// Force dynamic rendering to prevent caching
+export const dynamic = 'force-dynamic';
+
 /**
  * Get room state (read-only, canonical source of truth)
  * Returns room + current song + queue + upNext in one call

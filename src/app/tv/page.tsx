@@ -93,8 +93,15 @@ function TVModePageContent() {
    */
   const refreshState = useCallback(async (roomId: string) => {
     const requestId = ++requestIdRef.current;
+    console.log('[tv] refreshState called for room:', roomId);
     try {
       const state = await api.getRoomState(roomId);
+      console.log('[tv] refreshState received state:', {
+        roomId: state.room.id,
+        current_entry_id: state.room.current_entry_id,
+        currentSong: state.currentSong ? { id: state.currentSong.id, title: state.currentSong.song?.title } : null,
+        queueLength: state.queue.length
+      });
       
       // Only update if this is still the latest request
       if (requestId === requestIdRef.current) {
