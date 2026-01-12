@@ -6,6 +6,111 @@ import { api } from '@/lib/api';
 import { getOrCreateFingerprint } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState } from '@/shared/types';
 
+// Name Input Modal Component
+function NameInputModal({
+  onConfirm,
+  initialName,
+}: {
+  onConfirm: (name: string) => void;
+  initialName?: string;
+}) {
+  const [name, setName] = useState(initialName || '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Focus input when modal opens
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (trimmedName.length > 0) {
+      onConfirm(trimmedName);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 2000,
+        padding: '1rem',
+      }}
+    >
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '12px',
+          padding: '1.5rem',
+          maxWidth: '400px',
+          width: '100%',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: 0, marginBottom: '1rem', fontSize: '1.5rem' }}>
+          Enter Your Name
+        </h2>
+        <p style={{ margin: 0, marginBottom: '1.5rem', color: '#666', fontSize: '0.9rem' }}>
+          Please enter your name to join the room. This will help others identify you.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your name"
+            maxLength={50}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              fontSize: '1rem',
+              border: '2px solid #e0e0e0',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+              boxSizing: 'border-box',
+            }}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleSubmit(e);
+              }
+            }}
+          />
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <button
+              type="submit"
+              disabled={name.trim().length === 0}
+              style={{
+                padding: '0.75rem 1.5rem',
+                fontSize: '1rem',
+                background: name.trim().length > 0 ? '#0070f3' : '#ccc',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: name.trim().length > 0 ? 'pointer' : 'not-allowed',
+                fontWeight: '500',
+              }}
+            >
+              Join Room
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // Version Selector Modal Component
 function VersionSelectorModal({
   groupId,
@@ -192,55 +297,10 @@ export default function RoomPage() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'search' | 'queue'>('search');
+  const [showNameInput, setShowNameInput] = useState(false);
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (code) {
-      joinRoom();
-    }
-    
-    // Cleanup on unmount
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
-  }, [code]);
-
-  const joinRoom = async () => {
-    try {
-      const fingerprint = getOrCreateFingerprint();
-      const displayName = localStorage.getItem('user_display_name') || '';
-      
-      const { room: roomData, user: userData } = await api.joinRoom({
-        room_code: code.toUpperCase(),
-        user_fingerprint: fingerprint,
-        display_name: displayName,
-      });
-
-      setRoom(roomData);
-      setUser(userData);
-      
-      if (userData.display_name) {
-        localStorage.setItem('user_display_name', userData.display_name);
-      }
-
-      roomIdRef.current = roomData.id;
-      
-      // Initial load of room state
-      await refreshRoomState(roomData.id);
-
-      // Start polling
-      startPolling(roomData.id);
-    } catch (err: any) {
-      setError(err.message || 'Failed to join room');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   /**
    * Refresh room state from backend (canonical source of truth)
@@ -281,7 +341,63 @@ export default function RoomPage() {
     }, 2500); // 2.5 seconds
   }, [refreshRoomState]);
 
+  const joinRoom = useCallback(async (displayName: string) => {
+    try {
+      const fingerprint = getOrCreateFingerprint();
+      
+      const { room: roomData, user: userData } = await api.joinRoom({
+        room_code: code.toUpperCase(),
+        user_fingerprint: fingerprint,
+        display_name: displayName,
+      });
 
+      setRoom(roomData);
+      setUser(userData);
+      
+      // Ensure display name is stored (backend might have updated it)
+      if (userData.display_name) {
+        localStorage.setItem('user_display_name', userData.display_name);
+      }
+
+      roomIdRef.current = roomData.id;
+      
+      // Initial load of room state
+      await refreshRoomState(roomData.id);
+
+      // Start polling
+      startPolling(roomData.id);
+    } catch (err: any) {
+      setError(err.message || 'Failed to join room');
+    } finally {
+      setLoading(false);
+    }
+  }, [code, refreshRoomState, startPolling]);
+
+  const handleNameConfirm = useCallback((name: string) => {
+    // Store name in localStorage
+    localStorage.setItem('user_display_name', name);
+    setShowNameInput(false);
+    setLoading(true);
+    // Join room with the entered name
+    joinRoom(name);
+  }, [joinRoom]);
+
+  // Always require name input when joining room
+  useEffect(() => {
+    if (code) {
+      // Always show name input modal - name is required to join
+      setShowNameInput(true);
+      setLoading(false); // Don't show loading spinner while waiting for name
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [code]);
 
   const handleSearch = async () => {
     if (!room) return;
@@ -324,11 +440,48 @@ export default function RoomPage() {
   };
 
   const handleAddToQueue = async (group: SongGroupResult, versionId?: string) => {
-    if (!room || !user) return;
+    console.log('[handleAddToQueue] Called with:', { 
+      group_id: group.group_id, 
+      display_title: group.display_title,
+      versionId,
+      best_version: group.best_version,
+      room: !!room,
+      user: !!user
+    });
+
+    if (!room || !user) {
+      console.error('[handleAddToQueue] Missing room or user:', { room: !!room, user: !!user });
+      setError('Room or user not found. Please refresh the page.');
+      return;
+    }
 
     try {
       // Use provided version_id or best_version
-      const targetVersionId = versionId || group.best_version.version_id;
+      const targetVersionId = versionId || (group.best_version && group.best_version.version_id);
+      
+      if (!targetVersionId) {
+        console.error('[handleAddToQueue] No version_id available:', { 
+          versionId, 
+          best_version: group.best_version,
+          group_id: group.group_id,
+          available_versions: group.available.version_count
+        });
+        // If multiple versions available, open selector; otherwise show error
+        if (group.available.version_count > 1) {
+          setSelectedGroupId(group.group_id);
+          setShowVersionSelector(true);
+          return;
+        }
+        setError('No version available for this song. Please select a version.');
+        return;
+      }
+
+      console.log('[handleAddToQueue] Adding to queue:', { 
+        room_id: room.id, 
+        user_id: user.id, 
+        version_id: targetVersionId,
+        group_title: group.display_title
+      });
       
       // Use version_id (preferred) - API will map to song_id internally
       await api.addToQueue({
@@ -345,14 +498,26 @@ export default function RoomPage() {
       setShowVersionSelector(false);
       setSelectedGroupId(null);
     } catch (err: any) {
-      console.error('Failed to add to queue:', err);
-      setError(err.message || 'Failed to add song to queue');
+      console.error('[handleAddToQueue] Failed to add to queue:', err);
+      const errorMessage = err.message || 'Failed to add song to queue';
+      setError(errorMessage);
+      alert(`❌ Error: ${errorMessage}`);
     }
   };
 
   // Remove local queue math - backend is single source of truth
   // Calculate user queue count from backend state (no position calculations)
   const userQueueCount = queue.filter((item) => item.user_id === user?.id).length;
+
+  // Show name input modal if needed
+  if (showNameInput) {
+    return (
+      <NameInputModal
+        onConfirm={handleNameConfirm}
+        initialName={localStorage.getItem('user_display_name') || ''}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -537,7 +702,33 @@ export default function RoomPage() {
                     )}
                     <button
                       className="btn btn-primary"
-                      onClick={() => handleAddToQueue(group)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[button] Add clicked for group:', {
+                          group_id: group.group_id,
+                          display_title: group.display_title,
+                          best_version: group.best_version,
+                          has_best_version: !!group.best_version,
+                          version_id: group.best_version?.version_id
+                        });
+                        try {
+                          if (!group.best_version || !group.best_version.version_id) {
+                            console.warn('[button] No best_version available, opening version selector');
+                            if (group.available.version_count > 1) {
+                              setSelectedGroupId(group.group_id);
+                              setShowVersionSelector(true);
+                            } else {
+                              setError('No version available for this song');
+                            }
+                            return;
+                          }
+                          handleAddToQueue(group);
+                        } catch (err) {
+                          console.error('[button] Error in onClick handler:', err);
+                          setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                        }
+                      }}
                       style={{ padding: '0.5rem 1.5rem' }}
                     >
                       Add

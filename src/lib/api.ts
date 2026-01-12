@@ -127,16 +127,21 @@ export const api = {
   },
 
   async addToQueue(data: AddToQueueRequest): Promise<{ queueItem: QueueItem }> {
+    console.log('[api] addToQueue request:', data);
     const res = await fetch(`${API_BASE}/queue/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    console.log('[api] addToQueue response status:', res.status);
     if (!res.ok) {
       const errorText = await res.text();
+      console.error('[api] addToQueue error:', errorText);
       throw new Error(`Failed to add to queue: ${errorText}`);
     }
-    return res.json();
+    const result = await res.json();
+    console.log('[api] addToQueue success:', result);
+    return result;
   },
 
   // Backend-controlled playback (TV mode)
