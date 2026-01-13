@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -61,15 +61,15 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
     return () => clearTimeout(timer);
   }, [toast.id, toast.duration, onRemove]);
 
-  const getToastStyles = () => {
-    const baseStyles = {
+  const getToastStyles = (): React.CSSProperties => {
+    const baseStyles: React.CSSProperties = {
       padding: '1rem 1.25rem',
       borderRadius: '8px',
       boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
       display: 'flex',
       alignItems: 'center',
       gap: '0.75rem',
-      pointerEvents: 'auto',
+      pointerEvents: 'auto' as const,
       cursor: 'pointer',
       transition: 'all 0.3s ease',
       transform: isVisible ? 'translateX(0)' : 'translateX(400px)',
