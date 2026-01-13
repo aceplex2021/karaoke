@@ -663,7 +663,7 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Queue Sidebar */}
+      {/* Queue Sidebar - Enhanced scrolling for TV browsers */}
       <div
         style={{
           position: 'absolute',
@@ -675,13 +675,23 @@ function TVModePageContent() {
           color: 'white',
           padding: '1rem',
           overflowY: 'auto',
+          overflowX: 'hidden',
           zIndex: 500,
+          // Enhanced scrolling for TV browsers (FireTV, Smart TV)
+          scrollBehavior: 'smooth',
+          WebkitOverflowScrolling: 'touch', // iOS smooth scrolling
+          // Better scrollbar visibility for TV browsers
+          scrollbarWidth: 'thin', // Firefox
+          scrollbarColor: 'rgba(255,255,255,0.5) rgba(0,0,0,0.3)', // Firefox
+          // Webkit scrollbar styling (Chrome, Safari, Smart TV browsers)
+          // Note: These are pseudo-elements, so we'll add them via CSS class
         }}
+        className="tv-queue-scroll"
       >
-        <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+        <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '1rem', position: 'sticky', top: 0, background: 'rgba(0,0,0,0.8)', paddingBottom: '0.5rem', zIndex: 10 }}>
           Queue ({queue.length})
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingBottom: '1rem' }}>
           {queue.map((item) => (
             <div
               key={item.id}

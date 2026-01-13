@@ -115,3 +115,100 @@ select {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* TV Queue Scrolling - Enhanced for FireTV, Smart TV browsers */
+.tv-queue-scroll {
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  
+  /* Better scrollbar visibility for TV browsers */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.6) rgba(0, 0, 0, 0.3);
+}
+
+/* Webkit scrollbar styling (Chrome, Safari, Smart TV browsers) */
+.tv-queue-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+
+.tv-queue-scroll::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+}
+
+.tv-queue-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+}
+
+.tv-queue-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* Better focus visibility for remote control navigation */
+.tv-queue-scroll *:focus-visible {
+  outline: 3px solid rgba(0, 123, 255, 0.8);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Responsive Design - Mobile Optimizations */
+@media (max-width: 768px) {
+  /* Ensure touch targets are at least 44x44px on mobile */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Better spacing on mobile */
+  .card {
+    padding: 1rem;
+  }
+
+  /* Toast notifications - smaller on mobile */
+  .toast-container {
+    right: 0.5rem !important;
+    left: 0.5rem !important;
+    max-width: calc(100% - 1rem) !important;
+  }
+
+  /* Modal improvements for mobile */
+  .modal-content {
+    margin: 0.5rem;
+    max-height: calc(100vh - 1rem);
+  }
+}
+
+/* Tablet optimizations */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .card {
+    padding: 1.25rem;
+  }
+}
+
+/* Large screen optimizations */
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1400px;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets for touch devices */
+  button, a, input, select {
+    min-height: 48px;
+  }
+
+  /* Better spacing for touch */
+  .card {
+    padding: 1.5rem;
+  }
+
+  /* Remove hover effects on touch devices */
+  button:hover {
+    transform: none;
+  }
+}
+

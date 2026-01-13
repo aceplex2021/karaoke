@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getOrCreateFingerprint } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState } from '@/shared/types';
+import { useToast } from '@/components/Toast';
 
 // ====================================
 // VERSION DISPLAY HELPERS
@@ -524,12 +525,19 @@ export default function RoomPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [addingToQueue, setAddingToQueue] = useState(false);
+  const [removingFromQueue, setRemovingFromQueue] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'search' | 'queue'>('search');
   const [showNameInput, setShowNameInput] = useState(false);
+  const [showConfirmRemove, setShowConfirmRemove] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null);
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Toast notifications
+  const { success, error: showError, ToastContainer } = useToast();
 
   /**
    * Refresh room state from backend (canonical source of truth)
@@ -712,6 +720,8 @@ export default function RoomPage() {
         group_title: group.display_title
       });
       
+      setAddingToQueue(true);
+      
       // Use version_id (preferred) - API will map to song_id internally
       await api.addToQueue({
         room_id: room.id,
@@ -720,8 +730,8 @@ export default function RoomPage() {
       });
 
       setError('');
-      // Show success message
-      alert(`✅ Added "${group.display_title}" to queue!`);
+      // Show success toast
+      success(`Added "${group.display_title}" to queue!`);
       // UI does NOTHING - waits for next poll (≤3s) to see change
       // Rule: No immediate refresh, no optimistic UI
       setShowVersionSelector(false);
@@ -730,35 +740,43 @@ export default function RoomPage() {
       console.error('[handleAddToQueue] Failed to add to queue:', err);
       const errorMessage = err.message || 'Failed to add song to queue';
       setError(errorMessage);
-      alert(`❌ Error: ${errorMessage}`);
+      showError(errorMessage);
+    } finally {
+      setAddingToQueue(false);
     }
   };
 
-  const handleRemoveFromQueue = async (queueItemId: string, songTitle: string) => {
-    if (!user) {
-      setError('User not found. Please refresh the page.');
+  const handleRemoveFromQueue = (queueItemId: string, songTitle: string) => {
+    setPendingRemove({ id: queueItemId, title: songTitle });
+    setShowConfirmRemove(true);
+  };
+
+  const confirmRemove = async () => {
+    if (!user || !pendingRemove) {
       return;
     }
 
-    // Confirm removal
-    if (!window.confirm(`Remove "${songTitle}" from your queue?`)) {
-      return;
-    }
+    setShowConfirmRemove(false);
+    const { id, title } = pendingRemove;
+    setPendingRemove(null);
+    setRemovingFromQueue(true);
 
     try {
-      console.log('[handleRemoveFromQueue] Removing:', { queueItemId, songTitle, userId: user.id });
+      console.log('[handleRemoveFromQueue] Removing:', { queueItemId: id, songTitle: title, userId: user.id });
       
-      await api.removeQueueItem(queueItemId, user.id);
+      await api.removeQueueItem(id, user.id);
       
-      // Show success message
-      alert(`✅ Removed "${songTitle}" from queue`);
+      // Show success toast
+      success(`Removed "${title}" from queue`);
       // UI does NOTHING - waits for next poll to see change
       // Rule: No immediate refresh, no optimistic UI
     } catch (err: any) {
       console.error('[handleRemoveFromQueue] Failed to remove:', err);
       const errorMessage = err.message || 'Failed to remove song from queue';
       setError(errorMessage);
-      alert(`❌ Error: ${errorMessage}`);
+      showError(errorMessage);
+    } finally {
+      setRemovingFromQueue(false);
     }
   };
 
@@ -857,8 +875,8 @@ export default function RoomPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <button className="btn btn-primary" onClick={handleSearch} disabled={searching}>
-              {searching ? '...' : 'Search'}
+            <button className="btn btn-primary" onClick={handleSearch} disabled={searching} style={{ opacity: searching ? 0.6 : 1 }}>
+              {searching ? 'Searching...' : 'Search'}
             </button>
           </div>
           <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
@@ -989,9 +1007,14 @@ export default function RoomPage() {
                           setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
                         }
                       }}
-                      style={{ padding: '0.5rem 1.5rem' }}
+                      disabled={addingToQueue}
+                      style={{ 
+                        padding: '0.5rem 1.5rem',
+                        opacity: addingToQueue ? 0.6 : 1,
+                        cursor: addingToQueue ? 'not-allowed' : 'pointer',
+                      }}
                     >
-                      Add
+                      {addingToQueue ? 'Adding...' : 'Add'}
                     </button>
                   </div>
                 </div>
@@ -1137,12 +1160,13 @@ export default function RoomPage() {
                       {/* Remove Button */}
                       <button
                         onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
+                        disabled={removingFromQueue}
                         style={{
                           padding: '0.5rem',
                           background: '#fff',
                           border: '2px solid #dc3545',
                           borderRadius: '8px',
-                          cursor: 'pointer',
+                          cursor: removingFromQueue ? 'not-allowed' : 'pointer',
                           fontSize: '1.25rem',
                           lineHeight: 1,
                           minWidth: '44px',
@@ -1151,18 +1175,23 @@ export default function RoomPage() {
                           alignItems: 'center',
                           justifyContent: 'center',
                           transition: 'all 0.2s',
+                          opacity: removingFromQueue ? 0.6 : 1,
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = '#dc3545';
-                          e.currentTarget.style.color = 'white';
+                          if (!removingFromQueue) {
+                            e.currentTarget.style.background = '#dc3545';
+                            e.currentTarget.style.color = 'white';
+                          }
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = '#fff';
-                          e.currentTarget.style.color = '#dc3545';
+                          if (!removingFromQueue) {
+                            e.currentTarget.style.background = '#fff';
+                            e.currentTarget.style.color = '#dc3545';
+                          }
                         }}
                         title="Remove song from queue"
                       >
-                        🗑️
+                        {removingFromQueue ? '⏳' : '🗑️'}
                       </button>
                     </div>
                   </div>
@@ -1172,6 +1201,87 @@ export default function RoomPage() {
                   You haven't added any songs yet. Go to Search to add some!
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notifications */}
+      <ToastContainer />
+
+      {/* Confirmation Modal for Remove */}
+      {showConfirmRemove && pendingRemove && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            padding: '1rem',
+          }}
+          onClick={() => {
+            setShowConfirmRemove(false);
+            setPendingRemove(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              maxWidth: '400px',
+              width: '100%',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ margin: 0, marginBottom: '1rem', fontSize: '1.5rem' }}>
+              Remove Song?
+            </h2>
+            <p style={{ margin: 0, marginBottom: '1.5rem', color: '#666', fontSize: '1rem' }}>
+              Remove "{pendingRemove.title}" from your queue?
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowConfirmRemove(false);
+                  setPendingRemove(null);
+                }}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  fontSize: '1rem',
+                  background: '#f5f5f5',
+                  color: '#333',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemove}
+                disabled={removingFromQueue}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  fontSize: '1rem',
+                  background: removingFromQueue ? '#999' : '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: removingFromQueue ? 'not-allowed' : 'pointer',
+                  fontWeight: '500',
+                  opacity: removingFromQueue ? 0.6 : 1,
+                }}
+              >
+                {removingFromQueue ? 'Removing...' : 'Remove'}
+              </button>
             </div>
           </div>
         </div>
