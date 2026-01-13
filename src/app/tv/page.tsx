@@ -847,23 +847,24 @@ function TVModePageContent() {
         </div>
       </div>
 
-      {/* QR Code for joining */}
+      {/* QR Code for joining - Smaller size for less screen real estate */}
       {room && (
         <div
           style={{
             position: 'absolute',
             top: '1rem',
             left: '1rem',
-            background: 'rgba(255,255,255,0.9)',
-            padding: '1rem',
+            background: 'rgba(255,255,255,0.95)',
+            padding: '0.75rem',
             borderRadius: '8px',
             zIndex: 1000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
           }}
         >
-          <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-            Room: {room.room_code}
+          <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 'bold', textAlign: 'center' }}>
+            {room.room_code}
           </div>
-          <QRCode url={getQRCodeUrl(room.room_code)} size={120} />
+          <QRCode url={getQRCodeUrl(room.room_code)} size={90} />
         </div>
       )}
 
