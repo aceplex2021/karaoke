@@ -6,6 +6,113 @@ import { api } from '@/lib/api';
 import { getOrCreateFingerprint } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState } from '@/shared/types';
 
+// ====================================
+// VERSION DISPLAY HELPERS
+// ====================================
+
+/**
+ * Format mixer label for user-friendly display
+ */
+function formatMixerLabel(label: string | null | undefined): string {
+  if (!label) return 'Standard';
+  
+  const labelMap: Record<string, string> = {
+    'nam': 'Male Voice',
+    'nu': 'Female Voice',
+    'nam_nu': 'Duet (Male & Female)',
+    'beat': 'Beat Only (Instrumental)',
+    'acoustic': 'Acoustic Version',
+    'remix': 'Remix',
+    'original': 'Original',
+    'karaoke': 'Karaoke',
+  };
+  
+  const normalized = label.toLowerCase().trim();
+  return labelMap[normalized] || label.toUpperCase();
+}
+
+/**
+ * Get version icon based on mixer type
+ */
+function getVersionIcon(label: string | null | undefined): string {
+  if (!label) return '🎤';
+  
+  const iconMap: Record<string, string> = {
+    'nam': '👨',      // Male
+    'nu': '👩',       // Female
+    'nam_nu': '👫',   // Duet
+    'beat': '🎵',     // Instrumental
+    'acoustic': '🎸', // Acoustic
+    'remix': '🎧',    // Remix
+    'original': '🎤', // Original
+    'karaoke': '🎤',  // Karaoke
+  };
+  
+  const normalized = label.toLowerCase().trim();
+  return iconMap[normalized] || '🎤';
+}
+
+/**
+ * Format musical key
+ */
+function formatKey(key: string | null | undefined): string {
+  if (!key) return '';
+  return `Key: ${key}`;
+}
+
+/**
+ * Format tempo/BPM
+ */
+function formatTempo(tempo: number | null | undefined): string {
+  if (!tempo) return '';
+  return `${tempo} BPM`;
+}
+
+/**
+ * Get user-friendly description for mixer type
+ */
+function getVersionDescription(label: string | null | undefined): string {
+  if (!label) return 'Standard karaoke version';
+  
+  const descriptions: Record<string, string> = {
+    'nam': 'Lower pitch, suitable for male singers',
+    'nu': 'Higher pitch, suitable for female singers',
+    'nam_nu': 'Duet version with both male and female parts',
+    'beat': 'Instrumental only, no vocals',
+    'acoustic': 'Unplugged acoustic arrangement',
+    'remix': 'Modern remix with different arrangement',
+  };
+  
+  const normalized = label.toLowerCase().trim();
+  return descriptions[normalized] || 'Standard karaoke version';
+}
+
+/**
+ * Build complete version description with all available metadata
+ */
+function buildVersionDescription(version: GroupVersion): string[] {
+  const parts: string[] = [];
+  
+  // Always show mixer type (most important)
+  parts.push(formatMixerLabel(version.label));
+  
+  // Add key if available
+  if (version.pitch) {
+    parts.push(formatKey(version.pitch));
+  }
+  
+  // Add tempo if available
+  if (version.tempo) {
+    parts.push(formatTempo(version.tempo));
+  }
+  
+  return parts;
+}
+
+// ====================================
+// MODAL COMPONENTS
+// ====================================
+
 // Name Input Modal Component
 function NameInputModal({
   onConfirm,
@@ -111,7 +218,7 @@ function NameInputModal({
   );
 }
 
-// Version Selector Modal Component
+// Enhanced Version Selector Modal Component with Complete Metadata
 function VersionSelectorModal({
   groupId,
   group,
@@ -148,7 +255,7 @@ function VersionSelectorModal({
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'rgba(0,0,0,0.7)',
+        background: 'rgba(0,0,0,0.6)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -160,114 +267,229 @@ function VersionSelectorModal({
       <div
         style={{
           background: '#fff',
-          borderRadius: '12px',
+          borderRadius: '16px',
           padding: '1.5rem',
-          maxWidth: '500px',
-          width: '100%',
-          maxHeight: '80vh',
+          maxWidth: '600px',
+          width: '90%',
+          maxHeight: '85vh',
           overflowY: 'auto',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1.5rem' }}>Select Version</h2>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #eee' }}>
+          <h2 style={{ margin: 0, fontSize: '1.5rem', color: '#333' }}>Choose Your Version</h2>
           <button
             onClick={onClose}
             style={{
-              background: 'transparent',
+              background: 'none',
               border: 'none',
-              fontSize: '1.5rem',
+              fontSize: '2rem',
               cursor: 'pointer',
-              padding: '0.25rem 0.5rem',
+              width: '40px',
+              height: '40px',
+              padding: 0,
+              color: '#999',
+              transition: 'color 0.2s',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#333')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#999')}
           >
             ×
           </button>
         </div>
-        <div style={{ marginBottom: '1rem', color: '#666' }}>
-          <strong>{group.display_title}</strong>
+
+        {/* Song Info */}
+        <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #eee' }}>
+          <strong style={{ fontSize: '1.1rem' }}>{group.display_title}</strong>
           {group.artists.length > 0 && (
-            <div style={{ fontSize: '0.9rem', marginTop: '0.25rem' }}>
+            <div style={{ fontSize: '0.9rem', marginTop: '0.25rem', color: '#666' }}>
               {group.artists.join(', ')}
             </div>
           )}
         </div>
+
+        {/* Versions List */}
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '2rem' }}>Loading versions...</div>
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+            Loading versions...
+          </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {versions.map((version) => (
-              <button
-                key={version.version_id}
-                onClick={() => onSelect(version.version_id)}
-                style={{
-                  padding: '1rem',
-                  border: '2px solid #e0e0e0',
-                  borderRadius: '8px',
-                  background: '#fff',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#0070f3';
-                  e.currentTarget.style.background = '#f0f8ff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e0e0e0';
-                  e.currentTarget.style.background = '#fff';
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                      {version.tone && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1rem' }}>
+            {versions.map((version) => {
+              const icon = getVersionIcon(version.label);
+              const mixerLabel = formatMixerLabel(version.label);
+              const description = getVersionDescription(version.label);
+              const isRecommended = version.is_default;
+
+              return (
+                <div
+                  key={version.version_id}
+                  style={{
+                    padding: '1.25rem',
+                    border: isRecommended ? '2px solid #4CAF50' : '2px solid #ddd',
+                    borderRadius: '12px',
+                    transition: 'all 0.3s',
+                    background: isRecommended 
+                      ? 'linear-gradient(135deg, rgba(76, 175, 80, 0.08) 0%, rgba(76, 175, 80, 0.02) 100%)'
+                      : 'white',
+                    boxShadow: isRecommended ? '0 2px 8px rgba(76, 175, 80, 0.2)' : 'none',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => onSelect(version.version_id)}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.12)';
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = isRecommended ? '0 2px 8px rgba(76, 175, 80, 0.2)' : 'none';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }}
+                >
+                  {/* Version Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                    <span style={{ fontSize: '2.5rem', flexShrink: 0 }}>{icon}</span>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <h3 style={{ margin: 0, fontWeight: '700', fontSize: '1.2rem', color: '#333' }}>
+                        {mixerLabel}
+                      </h3>
+                      {isRecommended && (
                         <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.25rem 0.5rem',
-                          background: version.tone === 'nam' ? '#e3f2fd' : '#fce4ec',
-                          color: version.tone === 'nam' ? '#1976d2' : '#c2185b',
-                          borderRadius: '4px',
-                          fontWeight: '500',
+                          background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                          color: 'white',
+                          padding: '0.25rem 0.75rem',
+                          borderRadius: '20px',
+                          fontSize: '0.8rem',
+                          fontWeight: '600',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          width: 'fit-content',
                         }}>
-                          {version.tone.toUpperCase()}
-                        </span>
-                      )}
-                      {version.pitch && (
-                        <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.25rem 0.5rem',
-                          background: '#f5f5f5',
-                          color: '#666',
-                          borderRadius: '4px',
-                        }}>
-                          Key: {version.pitch}
-                        </span>
-                      )}
-                      {version.styles.length > 0 && version.styles[0] && (
-                        <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.25rem 0.5rem',
-                          background: '#fff3cd',
-                          color: '#856404',
-                          borderRadius: '4px',
-                        }}>
-                          {version.styles[0]}
+                          ⭐ Recommended
                         </span>
                       )}
                     </div>
-                    {version.duration_s && (
-                      <div style={{ fontSize: '0.85rem', color: '#999' }}>
-                        Duration: {Math.floor(version.duration_s / 60)}:{(version.duration_s % 60).toString().padStart(2, '0')}
+                  </div>
+
+                  {/* Metadata Tags */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+                    {version.pitch && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        background: 'linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%)',
+                        color: '#1976D2',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                      }}>
+                        <span style={{ fontSize: '1.1rem' }}>🎹</span>
+                        <span style={{ fontWeight: '600' }}>Key:</span>
+                        <span style={{ fontWeight: '700' }}>{version.pitch}</span>
+                      </div>
+                    )}
+                    {version.tempo && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        background: 'linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%)',
+                        color: '#F57C00',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                      }}>
+                        <span style={{ fontSize: '1.1rem' }}>⚡</span>
+                        <span style={{ fontWeight: '600' }}>Tempo:</span>
+                        <span style={{ fontWeight: '700' }}>{version.tempo} BPM</span>
+                      </div>
+                    )}
+                    {!version.pitch && !version.tempo && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        background: 'linear-gradient(135deg, #F3E5F5 0%, #E1BEE7 100%)',
+                        color: '#7B1FA2',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                      }}>
+                        <span style={{ fontSize: '1.1rem' }}>✨</span>
+                        <span style={{ fontWeight: '700' }}>Standard Version</span>
                       </div>
                     )}
                   </div>
-                  <div style={{ marginLeft: '1rem' }}>
-                    <span style={{ fontSize: '1.2rem' }}>▶</span>
+
+                  {/* Description */}
+                  <div style={{
+                    padding: '0.75rem',
+                    background: 'rgba(33, 150, 243, 0.08)',
+                    borderLeft: '3px solid #2196F3',
+                    borderRadius: '6px',
+                    fontSize: '0.9rem',
+                    color: '#555',
+                    lineHeight: '1.5',
+                    marginBottom: '1rem',
+                  }}>
+                    {description}
                   </div>
+
+                  {/* Select Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(version.version_id);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '1rem',
+                      background: isRecommended 
+                        ? 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)'
+                        : 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: '700',
+                      fontSize: '1rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      boxShadow: isRecommended 
+                        ? '0 4px 12px rgba(76, 175, 80, 0.3)'
+                        : '0 4px 12px rgba(33, 150, 243, 0.3)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = isRecommended
+                        ? 'linear-gradient(135deg, #45a049 0%, #388E3C 100%)'
+                        : 'linear-gradient(135deg, #1976D2 0%, #1565C0 100%)';
+                      e.currentTarget.style.boxShadow = isRecommended
+                        ? '0 6px 16px rgba(76, 175, 80, 0.4)'
+                        : '0 6px 16px rgba(33, 150, 243, 0.4)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = isRecommended
+                        ? 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)'
+                        : 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)';
+                      e.currentTarget.style.boxShadow = isRecommended
+                        ? '0 4px 12px rgba(76, 175, 80, 0.3)'
+                        : '0 4px 12px rgba(33, 150, 243, 0.3)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    <span style={{ fontSize: '1.2rem' }}>🎤</span>
+                    Add This Version
+                  </button>
                 </div>
-              </button>
-            ))}
+              );
+            })}
             {versions.length === 0 && (
               <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
                 No versions available
@@ -275,6 +497,13 @@ function VersionSelectorModal({
             )}
           </div>
         )}
+
+        {/* Footer Help Text */}
+        <div style={{ paddingTop: '1rem', borderTop: '1px solid #eee' }}>
+          <p style={{ textAlign: 'center', color: '#666', fontSize: '0.9rem', margin: 0, lineHeight: '1.5' }}>
+            💡 Tip: Choose the version that matches your vocal range
+          </p>
+        </div>
       </div>
     </div>
   );

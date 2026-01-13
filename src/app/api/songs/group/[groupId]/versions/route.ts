@@ -54,10 +54,10 @@ export async function GET(
       });
     }
 
-    // Get all versions
+    // Get all versions with complete metadata
     const { data: versions, error: versionsError } = await supabaseAdmin
       .from('kara_versions')
-      .select('id, song_id, label, key, is_default')
+      .select('id, song_id, label, key, tempo, is_default')
       .in('song_id', songIds)
       .order('is_default', { ascending: false })
       .order('id', { ascending: true });
@@ -99,9 +99,12 @@ export async function GET(
       const file = filesByVersion.get(v.id);
       return {
         version_id: v.id,
+        label: v.label || null,  // Raw label for frontend processing
         tone: v.label === 'nam' || v.label?.startsWith('nam_') ? 'nam' :
               v.label === 'nu' || v.label?.startsWith('nu_') ? 'nu' : null,
         pitch: v.key || null,
+        tempo: v.tempo || null,  // BPM
+        is_default: v.is_default || false,  // Recommended version flag
         styles: v.label ? [v.label] : [],
         duration_s: file?.duration_seconds || null,
         file: {
