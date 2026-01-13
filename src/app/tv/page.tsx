@@ -103,6 +103,11 @@ function TVModePageContent() {
         queueLength: state.queue.length
       });
       
+      // DETAILED DEBUG: Show full currentSong structure
+      if (state.currentSong) {
+        console.log('[tv] FULL currentSong:', JSON.stringify(state.currentSong, null, 2));
+      }
+      
       // Only update if this is still the latest request
       if (requestId === requestIdRef.current) {
         console.log('[tv] refreshState current_entry_id:', state.room.current_entry_id);
@@ -171,6 +176,22 @@ function TVModePageContent() {
   // Calculate if current TV session is the host
   const isHost = room && tvUserId && room.host_id === tvUserId;
 
+  /**
+   * Manual advance handler for "Play Next" button
+   */
+  const handleManualAdvance = async () => {
+    if (!room) return;
+    
+    console.log('[tv] Manual advance triggered');
+    try {
+      await api.advancePlayback(room.id);
+      console.log('[tv] /advance succeeded (manual)');
+      // UI does NOTHING - waits for next poll (≤3s)
+    } catch (err: any) {
+      console.error('[tv] Failed to advance manually:', err);
+      setError('Failed to skip to next song');
+    }
+  };
 
   /**
    * Video element handling
@@ -217,9 +238,9 @@ function TVModePageContent() {
           setHasUserInteracted(false);
         } else {
           setError(`Failed to play video: ${err.message}`);
-          // Report playback error to backend
-          if (room && currentSong) {
-            api.reportPlaybackError(room.id, currentSong.id).catch(console.error);
+          // On playback error, skip to next song
+          if (room) {
+            api.advancePlayback(room.id).catch(console.error);
           }
         }
       });
@@ -245,31 +266,23 @@ function TVModePageContent() {
     const handleEnded = async () => {
       console.log('[tv] onEnded fired');
       // Use refs to get latest values (not closure values)
-      const latestCurrentSong = currentSongRef.current;
       const latestRoom = roomRef.current;
       
-      console.log('[tv] handleEnded - currentSong:', latestCurrentSong?.id, 'room:', latestRoom?.id);
+      if (!latestRoom) {
+        console.warn('[tv] onEnded fired but no room');
+        return;
+      }
       
-      if (latestCurrentSong && latestRoom) {
-        console.log('[tv] Reporting ended for song:', latestCurrentSong.id, 'in room:', latestRoom.id);
-        try {
-          // Report ended to backend and await completion
-          await api.reportPlaybackEnded(latestRoom.id, latestCurrentSong.id);
-          console.log('[tv] ended API ok');
-          // Immediately refresh state to get next song (don't wait for polling)
-          await refreshState(latestRoom.id);
-        } catch (err: any) {
-          console.error('[tv] Failed to report playback ended:', err);
-          setError('Failed to report playback ended');
-          // Still try to refresh state even if report failed
-          try {
-            await refreshState(latestRoom.id);
-          } catch (refreshErr) {
-            console.error('[tv] Failed to refresh state after ended error:', refreshErr);
-          }
-        }
-      } else {
-        console.warn('[tv] onEnded fired but no currentSong or room:', { currentSong: latestCurrentSong, room: latestRoom });
+      console.log('[tv] Calling /advance for room:', latestRoom.id);
+      try {
+        // Call /advance endpoint (atomic state transition)
+        await api.advancePlayback(latestRoom.id);
+        console.log('[tv] /advance succeeded');
+        // UI does NOTHING - waits for next poll (≤3s) to see new state
+        // Rule: No immediate refresh, polling will pick up changes
+      } catch (err: any) {
+        console.error('[tv] Failed to advance playback:', err);
+        setError('Failed to advance to next song');
       }
     };
     
@@ -279,16 +292,18 @@ function TVModePageContent() {
     };
 
     const handleError = async (e: any) => {
-      console.error('Video error:', e);
-      setError('Video playback error');
-      // Report playback error to backend
-      if (currentSong && room) {
+      console.error('[tv] Video error:', e);
+      setError('Video playback error - skipping to next song');
+      
+      // On error, advance to next song (treat as skip)
+      const latestRoom = roomRef.current;
+      if (latestRoom) {
         try {
-          await api.reportPlaybackError(room.id, currentSong.id);
-          // Immediately refresh state (don't wait for polling)
-          await refreshState(room.id);
+          await api.advancePlayback(latestRoom.id);
+          console.log('[tv] /advance succeeded after error');
+          // UI does NOTHING - waits for next poll (≤3s)
         } catch (err) {
-          console.error('Failed to report playback error:', err);
+          console.error('[tv] Failed to advance after error:', err);
         }
       }
     };
@@ -378,22 +393,16 @@ function TVModePageContent() {
         playsInline
         onEnded={async () => {
           console.log('[tv] Video onEnded prop fired');
-          // This is a backup - the addEventListener in useEffect is primary
-          const latestCurrentSong = currentSongRef.current;
+          // Backup handler - the addEventListener in useEffect is primary
           const latestRoom = roomRef.current;
-          console.log('[tv] onEnded prop - currentSong:', latestCurrentSong?.id, 'room:', latestRoom?.id);
-          if (latestCurrentSong && latestRoom) {
+          console.log('[tv] onEnded prop fired for room:', latestRoom?.id);
+          if (latestRoom) {
             try {
-              await api.reportPlaybackEnded(latestRoom.id, latestCurrentSong.id);
-              console.log('[tv] ended API ok (from prop)');
-              await refreshState(latestRoom.id);
+              await api.advancePlayback(latestRoom.id);
+              console.log('[tv] /advance succeeded (from onEnded prop)');
+              // UI does NOTHING - waits for next poll (≤3s)
             } catch (err: any) {
-              console.error('[tv] Failed to report playback ended (from prop):', err);
-              try {
-                await refreshState(latestRoom.id);
-              } catch (refreshErr) {
-                console.error('[tv] Failed to refresh state:', refreshErr);
-              }
+              console.error('[tv] Failed to advance (from prop):', err);
             }
           }
         }}
@@ -615,15 +624,40 @@ function TVModePageContent() {
 
           {/* Song Info */}
           {currentSong && (
-            <div style={{ color: 'white' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-                {currentSong.song?.title || 'Unknown Song'}
-              </div>
-              {currentSong.user && (
-                <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>
-                  {currentSong.user.display_name || 'Guest'}
+            <div style={{ color: 'white', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                  {currentSong.song?.title || 'Unknown Song'}
                 </div>
-              )}
+                {currentSong.user && (
+                  <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                    {currentSong.user.display_name || 'Guest'}
+                  </div>
+                )}
+              </div>
+              
+              {/* Manual Advance Button */}
+              <button
+                onClick={handleManualAdvance}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  border: '2px solid white',
+                  borderRadius: '8px',
+                  color: 'white',
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+                }}
+              >
+                ⏭️ Play Next
+              </button>
             </div>
           )}
         </div>
@@ -775,10 +809,40 @@ function TVModePageContent() {
               )}
             </div>
           ))}
-          {queue.length === 0 && (
+          {queue.length === 0 && !currentSong && (
             <div style={{ textAlign: 'center', padding: '2rem', opacity: 0.6 }}>
               Queue is empty
             </div>
+          )}
+          
+          {/* Start Playing Button - shows when queue has songs but nothing playing */}
+          {!currentSong && queue.length > 0 && (
+            <button
+              onClick={async () => {
+                if (room) {
+                  try {
+                    await api.advancePlayback(room.id);
+                    console.log('[tv] Manual start triggered');
+                  } catch (err) {
+                    console.error('[tv] Failed to start playback:', err);
+                  }
+                }
+              }}
+              style={{
+                margin: '1rem auto',
+                padding: '1rem 2rem',
+                background: 'rgba(0, 255, 0, 0.3)',
+                border: '2px solid #00ff00',
+                borderRadius: '12px',
+                color: 'white',
+                fontSize: '1.2rem',
+                cursor: 'pointer',
+                display: 'block',
+                fontWeight: 'bold'
+              }}
+            >
+              ▶️ Start Playing
+            </button>
           )}
         </div>
       </div>

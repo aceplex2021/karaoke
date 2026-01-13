@@ -1,17 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
-import { QueueManager } from '@/server/lib/queue';
-import { resolveMediaUrlsForQueue } from '@/server/lib/media-url-resolver';
+import { config } from '@/server/config';
 import type { RoomState, QueueItem, Room } from '@/shared/types';
 
-// Force dynamic rendering to prevent caching
+// Force dynamic rendering - NO caching anywhere
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
- * Get room state (read-only, canonical source of truth)
- * Returns room + current song + queue + upNext in one call
- * Resolves all media URLs in a single batch query (no N+1)
- * This endpoint has no side effects (read-only)
+ * Extract basename (filename only) from storage_path
+ * Removes folder prefixes, UUID suffixes, and encoded slashes
+ */
+function extractBasename(storagePath: string): string {
+  if (!storagePath) return '';
+  const decoded = decodeURIComponent(storagePath);
+  const parts = decoded.trim().replace(/^[/\\]+|[/\\]+$/g, '').split(/[/\\]+/);
+  let basename = parts[parts.length - 1].replace(/%2F/gi, '').replace(/^Videos[/\\]/i, '');
+  
+  // Remove UUID suffix pattern: __[8-char-hex] before file extension
+  // Example: "Song__c9c0a719.mp4" -> "Song.mp4"
+  basename = basename.replace(/__[a-f0-9]{8,}(\.[^.]+)$/i, '$1');
+  
+  return basename;
+}
+
+/**
+ * GET /api/rooms/[roomId]/state
+ * 
+ * Pure read endpoint - ZERO side effects
+ * Returns current room state as single source of truth
+ * 
+ * Rules enforced:
+ * - No auto-start logic
+ * - No state inference
+ * - No caching
+ * - Returns ONLY what's in database
  */
 export async function GET(
   request: NextRequest,
@@ -20,113 +43,155 @@ export async function GET(
   try {
     const { roomId } = params;
     
-    // Fetch room
+    // 1. Get room metadata
     const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
       .select('*')
       .eq('id', roomId)
       .single();
-
-    console.log(`[state] Room query for ${roomId}:`, {
-      found: !!room,
-      current_entry_id: room?.current_entry_id,
-      error: roomError ? { message: roomError.message, code: roomError.code } : null
-    });
-
+    
     if (roomError || !room) {
       return NextResponse.json(
         { error: 'Room not found' },
         { status: 404 }
       );
     }
-
-    // Fetch current song (if any) - this is the playing item
-    const currentSong = await QueueManager.getCurrentSong(roomId);
-    console.log(`[state] getCurrentSong returned:`, currentSong ? { id: currentSong.id, status: currentSong.status } : null);
-
-    // Fetch queue (pending only, ledger order) - exclude playing to avoid duplicates
-    const { data: queueItems, error: queueError } = await supabaseAdmin
+    
+    // 2. Get current playing song (if any)
+    let currentSong: QueueItem | null = null;
+    if (room.current_entry_id) {
+      const { data } = await supabaseAdmin
+        .from('kara_queue')
+        .select(`
+          *,
+          kara_versions!version_id (
+            *,
+            kara_songs!song_id (*),
+            kara_files!version_id (storage_path, type)
+          ),
+          kara_users!user_id (*)
+        `)
+        .eq('id', room.current_entry_id)
+        .eq('status', 'playing')
+        .single();
+      
+      if (data) {
+        const version = data.kara_versions || null;
+        const song = version?.kara_songs || null;
+        const files = version?.kara_files || [];
+        
+        // Construct media_url from kara_files
+        let media_url = null;
+        
+        // Find video file
+        const videoFiles = Array.isArray(files) ? files : (files ? [files] : []);
+        const videoFile = videoFiles.find((f: any) => f.type === 'video');
+        
+        if (videoFile && videoFile.storage_path) {
+          const basename = extractBasename(videoFile.storage_path);
+          media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
+        }
+        
+        // Map for backward compatibility
+        currentSong = {
+          ...data,
+          version,
+          song: song ? {
+            ...song,
+            media_url
+          } : null,
+          user: data.kara_users || null
+        } as QueueItem;
+      }
+    }
+    
+    // 3. Get pending queue (ordered by position)
+    const { data: queueData, error: queueError } = await supabaseAdmin
       .from('kara_queue')
       .select(`
         *,
-        song: kara_songs(*),
-        user: kara_users(*)
+        kara_versions!version_id (
+          *,
+          kara_songs!song_id (*),
+          kara_files!version_id (storage_path, type)
+        ),
+        kara_users!user_id (*)
       `)
       .eq('room_id', roomId)
-      .eq('status', 'pending') // Only pending items in queue
+      .eq('status', 'pending')
       .order('position', { ascending: true });
-
+    
     if (queueError) {
-      throw new Error(`Failed to fetch queue: ${queueError.message}`);
+      console.error('[state] Queue query error:', queueError);
     }
-
-    let queue = (queueItems || []) as QueueItem[];
-
-    // Fetch up next (turn order, informational only)
-    const upNext = await QueueManager.selectNextSong(roomId);
-
-    // Collect unique items for media URL resolution
-    // Use Map to ensure uniqueness by ID
-    const itemsMap = new Map<string, QueueItem>();
     
-    if (currentSong) {
-      itemsMap.set(currentSong.id, currentSong);
-    }
-    if (upNext) {
-      itemsMap.set(upNext.id, upNext);
-    }
-    // Add queue items (already filtered to pending, but ensure uniqueness)
-    for (const item of queue) {
-      itemsMap.set(item.id, item);
-    }
-
-    // Convert to array of unique items for batch resolution
-    const uniqueItems = Array.from(itemsMap.values());
-
-    // Single batch call to resolve all media URLs at once
-    const itemsWithUrls = await resolveMediaUrlsForQueue(uniqueItems);
-
-    // Create lookup map for resolved items
-    const resolvedMap = new Map<string, QueueItem>();
-    for (const item of itemsWithUrls) {
-      resolvedMap.set(item.id, item);
-    }
-
-    // Map back to separate items using resolved data
-    const currentWithUrl = currentSong 
-      ? (resolvedMap.get(currentSong.id) || null)
-      : null;
-    const upNextWithUrl = upNext
-      ? (resolvedMap.get(upNext.id) || null)
-      : null;
+    console.log('[state] Queue query result:', {
+      roomId,
+      count: queueData?.length || 0,
+      firstItem: queueData?.[0] ? {
+        id: queueData[0].id,
+        version: queueData[0].kara_versions,
+        song: queueData[0].kara_versions?.kara_songs,
+        files: queueData[0].kara_versions?.kara_files
+      } : null
+    });
     
-    // Map queue items (pending only, exclude playing)
-    // Ensure uniqueness by ID
-    const queueWithUrlsMap = new Map<string, QueueItem>();
-    for (const item of queue) {
-      const resolved = resolvedMap.get(item.id);
-      if (resolved) {
-        queueWithUrlsMap.set(item.id, resolved);
+    // Map queue items for backward compatibility
+    const queue = (queueData || []).map(item => {
+      const version = item.kara_versions || null;
+      const song = version?.kara_songs || null;
+      const files = version?.kara_files || [];
+      
+      // Construct media_url from kara_files
+      let media_url = null;
+      
+      // Find video file
+      const videoFiles = Array.isArray(files) ? files : (files ? [files] : []);
+      const videoFile = videoFiles.find((f: any) => f.type === 'video');
+      
+      if (videoFile && videoFile.storage_path) {
+        const basename = extractBasename(videoFile.storage_path);
+        media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
       }
-    }
-    const queueWithUrls = Array.from(queueWithUrlsMap.values())
-      .sort((a, b) => a.position - b.position); // Maintain ledger order
-
+      
+      return {
+        ...item,
+        version,
+        song: song ? {
+          ...song,
+          media_url
+        } : null,
+        user: item.kara_users || null
+      };
+    }) as QueueItem[];
+    
+    // 4. Get next song (first in queue for upNext display)
+    const upNext = queue.length > 0 ? queue[0] : null;
+    
+    // 5. Return state (pure data, no business logic)
     const state: RoomState = {
       room: room as Room,
-      currentSong: currentWithUrl,
-      queue: queueWithUrls,
-      upNext: upNextWithUrl
+      currentSong,
+      queue,
+      upNext
     };
-
-    return NextResponse.json(state);
+    
+    return NextResponse.json(state, {
+      headers: {
+        // STRICT no-cache headers
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Surrogate-Control': 'no-store'
+      }
+    });
+    
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    console.error('Error getting room state:', error);
+    console.error('[state] Error:', error);
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }
     );
   }
 }
-

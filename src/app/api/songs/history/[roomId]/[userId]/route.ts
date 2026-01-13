@@ -15,7 +15,7 @@ export async function GET(
       .from('kara_song_history')
       .select(`
         *,
-        song: kara_songs(*)
+        kara_songs(*)
       `)
       .eq('room_id', roomId)
       .eq('user_id', userId)
@@ -23,6 +23,13 @@ export async function GET(
 
     if (error) {
       throw new Error(`Failed to fetch history: ${error.message}`);
+    }
+    
+    // Map kara_songs to song for backward compatibility
+    if (history) {
+      for (const item of history) {
+        (item as any).song = (item as any).kara_songs;
+      }
     }
 
     return NextResponse.json({ history: history || [] });

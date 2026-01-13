@@ -51,9 +51,13 @@ export const api = {
   },
 
   async getRoomState(roomId: string): Promise<RoomState> {
-    // Prevent caching: append timestamp to ensure fresh data
+    // ENFORCE: No caching - fresh data every poll
     const res = await fetch(`${API_BASE}/rooms/${roomId}/state?t=${Date.now()}`, {
       cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
     });
     if (!res.ok) throw new Error('Failed to get room state');
     return res.json();
@@ -151,22 +155,28 @@ export const api = {
     return res.json();
   },
 
-  async reportPlaybackEnded(roomId: string, queueItemId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/${roomId}/playback-ended`, {
+  /**
+   * Advance playback to next song (TV-only)
+   * Called when video ends or "Play Next" clicked
+   * Atomic state transition: current→completed, next→playing
+   */
+  async advancePlayback(roomId: string): Promise<{ success: boolean; advanced: boolean }> {
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/advance`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ queueItemId }),
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store'
     });
-    if (!res.ok) throw new Error('Failed to report playback ended');
-  },
-
-  async reportPlaybackError(roomId: string, queueItemId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/${roomId}/playback-error`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ queueItemId }),
-    });
-    if (!res.ok) throw new Error('Failed to report playback error');
+    
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || 'Failed to advance playback');
+    }
+    
+    return res.json();
   },
 
   async markAsCompleted(

@@ -1,134 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// Mark route as dynamic
-export const dynamic = 'force-dynamic';
 import { supabaseAdmin } from '@/server/lib/supabase';
-import { QueueManager } from '@/server/lib/queue';
-import { config } from '@/server/config';
-import { extractBasename } from '@/server/lib/media-url-resolver';
-import type { AddToQueueRequest, QueueItem } from '@/shared/types';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
- * Add song to queue
- * Accepts either version_id (preferred) or song_id (legacy)
+ * POST /api/queue/add
+ * 
+ * Simple write endpoint - stores version_id only
+ * Returns immediately - NO auto-start logic
+ * 
+ * Rules enforced:
+ * - Stores version_id (not song_id)
+ * - No ensurePlaying()
+ * - No side effects
+ * - Device waits for poll to see change
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as AddToQueueRequest;
-    const { room_id, song_id, version_id, user_id } = body;
-
-    console.log('[queue/add] Request body:', { room_id, song_id, version_id, user_id });
-
-    if (!room_id || !user_id) {
-      console.error('[queue/add] Missing required fields:', { room_id, user_id });
+    const body = await request.json();
+    const { room_id, version_id, user_id } = body;
+    
+    // Validate required fields
+    if (!room_id || !version_id || !user_id) {
       return NextResponse.json(
-        { error: 'room_id and user_id are required' },
+        { error: 'room_id, version_id, and user_id are required' },
         { status: 400 }
       );
-    }
-
-    // If version_id provided, get song_id from version
-    let targetSongId = song_id;
-    if (version_id && !song_id) {
-      const { data: version, error: versionError } = await supabaseAdmin
-        .from('kara_versions')
-        .select('song_id')
-        .eq('id', version_id)
-        .single();
-
-      if (versionError || !version) {
-        return NextResponse.json(
-          { error: 'Version not found' },
-          { status: 404 }
-        );
-      }
-
-      targetSongId = version.song_id;
-    }
-
-    if (!targetSongId) {
-      return NextResponse.json(
-        { error: 'Either song_id or version_id is required' },
-        { status: 400 }
-      );
-    }
-
-    console.log('[queue/add] Adding to queue:', { room_id, targetSongId, user_id, version_id });
-    const queueItem = await QueueManager.addToQueue(room_id, targetSongId, user_id, version_id);
-    console.log('[queue/add] Queue item created:', queueItem.id);
-    console.log('[queue/add] ensurePlaying should have been called by addToQueue');
-
-    // Fetch with joined data
-    const { data: fullItem, error } = await supabaseAdmin
-      .from('kara_queue')
-      .select(`
-        *,
-        song: kara_songs(*),
-        user: kara_users(*)
-      `)
-      .eq('id', queueItem.id)
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to fetch queue item: ${error.message}`);
-    }
-
-    // Get version_id from queueItem (might be in memory if column doesn't exist)
-    const itemVersionId = (queueItem as any).version_id || version_id;
-
-    // Add media URL - prefer version file, fallback to song file_path
-    if (itemVersionId) {
-      try {
-        const { data: versionData } = await supabaseAdmin
-          .from('kara_versions')
-          .select(`
-            id,
-            kara_files!inner(
-              id,
-              storage_path,
-              type
-            )
-          `)
-          .eq('id', itemVersionId)
-          .eq('kara_files.type', 'video')
-          .single();
-        
-        if (versionData && versionData.kara_files && versionData.kara_files.length > 0) {
-          const file = Array.isArray(versionData.kara_files) 
-            ? versionData.kara_files[0] 
-            : versionData.kara_files;
-          if (file.storage_path) {
-            const basename = extractBasename(file.storage_path);
-            (fullItem as any).song = (fullItem as any).song || {};
-            (fullItem as any).song.media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
-            return NextResponse.json({ queueItem: fullItem as QueueItem });
-          }
-        }
-      } catch (e) {
-        console.log('Failed to fetch version file, using fallback:', e);
-      }
     }
     
-    // Fallback to song file_path (extract basename)
-    if (fullItem.song && (fullItem.song as any).file_path) {
-      const basename = extractBasename((fullItem.song as any).file_path);
-      (fullItem as any).song.media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
+    // 1. Calculate next position (simple max + 1)
+    const { data: maxPosData } = await supabaseAdmin
+      .from('kara_queue')
+      .select('position')
+      .eq('room_id', room_id)
+      .in('status', ['pending', 'playing'])
+      .order('position', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    const position = (maxPosData?.position || 0) + 1;
+    
+    // 2. Insert into queue (stores version_id ONLY, not song_id)
+    const { data, error } = await supabaseAdmin
+      .from('kara_queue')
+      .insert({
+        room_id,
+        version_id,  // ← Single source of truth
+        user_id,
+        position,
+        status: 'pending'  // Always starts as pending
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[queue/add] Insert error:', error);
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
     }
-
-    console.log('[queue/add] Successfully added queue item:', fullItem.id);
-    return NextResponse.json({ queueItem: fullItem as QueueItem });
+    
+    // 3. Return immediately (NO auto-start, NO ensurePlaying)
+    // Device will see song in queue on next poll (≤3s)
+    return NextResponse.json({
+      success: true,
+      queueItem: data
+    });
+    
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('[queue/add] Error adding to queue:', {
-      message: errorMessage,
-      stack: errorStack,
-      error
-    });
+    console.error('[queue/add] Error:', error);
     return NextResponse.json(
       { error: errorMessage },
       { status: 500 }
     );
   }
 }
-

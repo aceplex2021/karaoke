@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
 
 // Server-side Supabase client with service role key for admin operations
+// ENFORCE: No caching by design
 export const supabaseAdmin = createClient(
   config.supabase.url,
   config.supabase.serviceRoleKey,
@@ -9,6 +10,13 @@ export const supabaseAdmin = createClient(
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
     },
   }
 );

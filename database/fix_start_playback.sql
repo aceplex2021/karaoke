@@ -1,12 +1,6 @@
--- Fix: Ensure start_playback function exists with correct signature
--- Run this in Supabase SQL Editor if you get "Could not find the function" errors
+-- Fix start_playback function - add missing v_rows_updated variable
+-- This was causing the function to fail silently when checking if the queue update succeeded
 
--- Drop and recreate to ensure correct signature
-DROP FUNCTION IF EXISTS start_playback(UUID, UUID);
-DROP FUNCTION IF EXISTS start_playback(p_room_id UUID, p_entry_id UUID);
-DROP FUNCTION IF EXISTS start_playback(p_entry_id UUID, p_room_id UUID);
-
--- Create function with correct signature: p_room_id first, then p_entry_id
 CREATE OR REPLACE FUNCTION start_playback(
     p_room_id UUID,
     p_entry_id UUID
@@ -15,7 +9,7 @@ RETURNS BOOLEAN AS $$
 DECLARE
     v_lock_key BIGINT;
     v_current_entry_id UUID;
-    v_rows_updated INTEGER;
+    v_rows_updated INTEGER; -- FIX: This was missing!
 BEGIN
     -- Use room_id as advisory lock key
     v_lock_key := ('x' || substr(md5(p_room_id::text), 1, 16))::bit(64)::bigint;
@@ -61,11 +55,3 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql;
-
--- Verify function exists
-SELECT 
-    proname as function_name,
-    pg_get_function_arguments(oid) as arguments
-FROM pg_proc 
-WHERE proname = 'start_playback';
-

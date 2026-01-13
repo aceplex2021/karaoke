@@ -282,6 +282,7 @@ RETURNS BOOLEAN AS $$
 DECLARE
     v_lock_key BIGINT;
     v_current_entry_id UUID;
+    v_rows_updated INTEGER;
 BEGIN
     -- Use room_id as advisory lock key
     v_lock_key := ('x' || substr(md5(p_room_id::text), 1, 16))::bit(64)::bigint;

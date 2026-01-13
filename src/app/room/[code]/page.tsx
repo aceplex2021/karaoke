@@ -493,8 +493,8 @@ export default function RoomPage() {
       setError('');
       // Show success message
       alert(`✅ Added "${group.display_title}" to queue!`);
-      // Refresh state to get updated queue (polling will also trigger refresh)
-      await refreshRoomState(room.id);
+      // UI does NOTHING - waits for next poll (≤3s) to see change
+      // Rule: No immediate refresh, no optimistic UI
       setShowVersionSelector(false);
       setSelectedGroupId(null);
     } catch (err: any) {
