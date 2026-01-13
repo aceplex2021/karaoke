@@ -127,6 +127,7 @@ export async function GET(request: NextRequest) {
             song_id,
             label,
             key,
+            tempo,
             is_default,
             kara_files!inner (
               id,
@@ -152,6 +153,7 @@ export async function GET(request: NextRequest) {
               song_id: v.song_id,
               label: v.label,
               key: v.key,
+              tempo: v.tempo,
               is_default: v.is_default,
               file: {
                 id: file.id,
@@ -180,9 +182,12 @@ export async function GET(request: NextRequest) {
           artists: artistNames,
           best_version: bestVersion ? {
             version_id: bestVersion.id,
+            label: bestVersion.label || null,
             tone: bestVersion.label === 'nam' || bestVersion.label?.startsWith('nam_') ? 'nam' :
                   bestVersion.label === 'nu' || bestVersion.label?.startsWith('nu_') ? 'nu' : null,
             pitch: bestVersion.key || null,
+            tempo: bestVersion.tempo || null,
+            is_default: bestVersion.is_default || false,
             styles: bestVersion.label ? [bestVersion.label] : [],
             file: bestVersion.file,
           } : null,

@@ -45,8 +45,11 @@ export interface VersionFile {
 
 export interface VersionInfo {
   version_id: string;
+  label: string | null; // Mixer type (nam, nu, nam_nu, beat, etc.)
   tone: "nam" | "nu" | null;
   pitch: string | null;
+  tempo: number | null; // BPM
+  is_default: boolean; // Recommended version flag
   styles: string[];
   file: VersionFile;
 }
@@ -71,8 +74,11 @@ export interface SearchSongsResponse {
 
 export interface GroupVersion {
   version_id: string;
+  label: string | null; // Mixer type (nam, nu, nam_nu, beat, etc.)
   tone: string | null;
   pitch: string | null;
+  tempo: number | null; // BPM
+  is_default: boolean; // Recommended version flag
   styles: string[];
   duration_s: number | null;
   file: VersionFile;
