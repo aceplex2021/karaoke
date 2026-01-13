@@ -148,6 +148,24 @@ export const api = {
     return result;
   },
 
+  async removeQueueItem(queueItemId: string, userId: string): Promise<{ success: boolean; message: string }> {
+    console.log('[api] removeQueueItem request:', { queueItemId, userId });
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    console.log('[api] removeQueueItem response status:', res.status);
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+      console.error('[api] removeQueueItem error:', errorData);
+      throw new Error(errorData.error || `Failed to remove from queue: ${res.status}`);
+    }
+    const result = await res.json();
+    console.log('[api] removeQueueItem success:', result);
+    return result;
+  },
+
   // Backend-controlled playback (TV mode)
   async getCurrentSong(roomId: string): Promise<{ queueItem: QueueItem | null }> {
     const res = await fetch(`${API_BASE}/queue/${roomId}/current`);

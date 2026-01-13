@@ -505,9 +505,40 @@ export default function RoomPage() {
     }
   };
 
+  const handleRemoveFromQueue = async (queueItemId: string, songTitle: string) => {
+    if (!user) {
+      setError('User not found. Please refresh the page.');
+      return;
+    }
+
+    // Confirm removal
+    if (!window.confirm(`Remove "${songTitle}" from your queue?`)) {
+      return;
+    }
+
+    try {
+      console.log('[handleRemoveFromQueue] Removing:', { queueItemId, songTitle, userId: user.id });
+      
+      await api.removeQueueItem(queueItemId, user.id);
+      
+      // Show success message
+      alert(`✅ Removed "${songTitle}" from queue`);
+      // UI does NOTHING - waits for next poll to see change
+      // Rule: No immediate refresh, no optimistic UI
+    } catch (err: any) {
+      console.error('[handleRemoveFromQueue] Failed to remove:', err);
+      const errorMessage = err.message || 'Failed to remove song from queue';
+      setError(errorMessage);
+      alert(`❌ Error: ${errorMessage}`);
+    }
+  };
+
   // Remove local queue math - backend is single source of truth
   // Calculate user queue count from backend state (no position calculations)
   const userQueueCount = queue.filter((item) => item.user_id === user?.id).length;
+  
+  // Filter queue to show only current user's songs
+  const userQueue = queue.filter((item) => item.user_id === user?.id);
 
   // Show name input modal if needed
   if (showNameInput) {
@@ -843,19 +874,18 @@ export default function RoomPage() {
             </div>
           )}
 
-          {/* Queue Section (Ledger Order - All Pending Items) */}
+          {/* Queue Section (User's Songs Only) */}
           <div style={{ width: '100%', overflow: 'visible' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 'bold', marginBottom: '0.75rem' }}>
-              Queue (in order added)
+              Your Queue
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '100%' }}>
-              {queue.length > 0 ? (
-                queue.map((item) => (
+              {userQueue.length > 0 ? (
+                userQueue.map((item, index) => (
                   <div
                     key={item.id}
                     className="card"
                     style={{
-                      opacity: item.user_id === user.id ? 1 : 0.8,
                       width: '100%',
                       overflow: 'visible', // Ensure buttons aren't clipped
                     }}
@@ -863,7 +893,7 @@ export default function RoomPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem', width: '100%' }}>
                       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                         <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.25rem' }}>
-                          #{item.position}
+                          #{index + 1}
                         </div>
                         <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
                           {item.song?.title}
@@ -873,19 +903,44 @@ export default function RoomPage() {
                             {item.song.artist}
                           </div>
                         )}
-                        {item.user && (
-                          <div style={{ fontSize: '0.85rem', color: '#999' }}>
-                            🎤 {item.user.display_name || 'Guest'}
-                            {item.user_id === user.id && ' (You)'}
-                          </div>
-                        )}
                       </div>
+                      
+                      {/* Remove Button */}
+                      <button
+                        onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
+                        style={{
+                          padding: '0.5rem',
+                          background: '#fff',
+                          border: '2px solid #dc3545',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '1.25rem',
+                          lineHeight: 1,
+                          minWidth: '44px',
+                          minHeight: '44px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#dc3545';
+                          e.currentTarget.style.color = 'white';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = '#fff';
+                          e.currentTarget.style.color = '#dc3545';
+                        }}
+                        title="Remove song from queue"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 ))
               ) : (
                 <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-                  Queue is empty. Add some songs!
+                  You haven't added any songs yet. Go to Search to add some!
                 </div>
               )}
             </div>
