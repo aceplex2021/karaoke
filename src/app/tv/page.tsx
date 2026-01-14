@@ -874,7 +874,7 @@ function TVModePageContent() {
           <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 'bold', textAlign: 'center' }}>
             {room.room_code}
           </div>
-          <QRCode url={getQRCodeUrl(room.room_code)} size={90} />
+          <QRCode url={getQRCodeUrl(room.room_code)} size={45} />
         </div>
       )}
 

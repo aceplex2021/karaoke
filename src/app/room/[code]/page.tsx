@@ -238,6 +238,7 @@ function VersionSelectorModal({
     const loadVersions = async () => {
       try {
         const data = await api.getGroupVersions(groupId);
+        console.log('[VersionSelector] Loaded versions:', data.versions);
         setVersions(data.versions);
       } catch (err) {
         console.error('Failed to load versions:', err);
@@ -914,50 +915,93 @@ export default function RoomPage() {
                         {group.artists.join(', ')}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                      {group.best_version.tone && (
-                        <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.25rem 0.5rem',
-                          background: group.best_version.tone === 'nam' ? '#e3f2fd' : '#fce4ec',
-                          color: group.best_version.tone === 'nam' ? '#1976d2' : '#c2185b',
-                          borderRadius: '4px',
-                          fontWeight: '500',
-                        }}>
-                          {group.best_version.tone.toUpperCase()}
+                    {/* Enhanced Version Info Display */}
+                    {group.best_version && (
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem', 
+                        marginTop: '0.75rem',
+                        padding: '0.5rem',
+                        background: 'rgba(33, 150, 243, 0.1)',
+                        borderRadius: '6px',
+                      }}>
+                        <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>
+                          {getVersionIcon(group.best_version.label)}
                         </span>
-                      )}
-                      {group.best_version.pitch && (
-                        <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.25rem 0.5rem',
-                          background: '#f5f5f5',
-                          color: '#666',
-                          borderRadius: '4px',
-                        }}>
-                          Key: {group.best_version.pitch}
-                        </span>
-                      )}
-                      {group.available.version_count > 1 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', flex: 1 }}>
+                          <span style={{
+                            fontSize: '0.85rem',
+                            padding: '0.25rem 0.5rem',
+                            background: 'white',
+                            borderRadius: '4px',
+                            fontWeight: '600',
+                            color: '#333',
+                          }}>
+                            {formatMixerLabel(group.best_version.label)}
+                          </span>
+                          {group.best_version.pitch && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%)',
+                              color: '#1976D2',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              🎹 {group.best_version.pitch}
+                            </span>
+                          )}
+                          {group.best_version.tempo && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%)',
+                              color: '#F57C00',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              ⚡ {group.best_version.tempo} BPM
+                            </span>
+                          )}
+                          {group.best_version.is_default && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                              color: 'white',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              ⭐ Recommended
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {group.available.version_count > 1 && (
+                      <div style={{ marginTop: '0.5rem' }}>
                         <span
                           onClick={() => {
                             setSelectedGroupId(group.group_id);
                             setShowVersionSelector(true);
                           }}
                           style={{
-                            fontSize: '0.75rem',
-                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.85rem',
+                            padding: '0.5rem 0.75rem',
                             background: '#fff3cd',
                             color: '#856404',
-                            borderRadius: '4px',
+                            borderRadius: '6px',
                             cursor: 'pointer',
                             border: '1px solid #ffc107',
+                            display: 'inline-block',
+                            fontWeight: '500',
                           }}
                         >
-                          {group.available.version_count} versions
+                          See {group.available.version_count} versions
                         </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
                     {group.available.version_count > 1 && (
