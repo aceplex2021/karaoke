@@ -324,16 +324,18 @@ function TVModePageContent() {
         console.log('[tv] /advance succeeded');
         
         // Mobile-friendly: Immediately refresh state and play next song
-        // Use refreshState() to properly update state with requestId protection (prevents queue clearing bug)
-        // Then play video immediately (still in video event context for mobile autoplay)
-        if (videoRef.current && hasUserInteracted) {
+        // Use requestId protection to prevent race conditions with polling
+        // Always try to update state immediately (not just if hasUserInteracted)
+        // This ensures the last song in queue is not skipped
+        if (videoRef.current) {
           try {
-            console.log('[tv] Immediately refreshing state for autoplay (in video event context)');
-            // Use refreshState() which has proper requestId protection - this prevents race conditions
+            console.log('[tv] Immediately refreshing state after advance (in video event context)');
+            // Small delay to ensure database transaction completes
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
             const state = await api.getRoomState(latestRoom.id);
             
-            // Update state using refreshState's logic but inline to get state immediately
-            // We'll use the requestId protection from refreshState
+            // Update state using requestId protection (prevents queue clearing bug)
             const requestId = ++requestIdRef.current;
             
             if (requestId === requestIdRef.current) {
@@ -341,35 +343,57 @@ function TVModePageContent() {
               roomRef.current = state.room;
               setCurrentSong(state.currentSong);
               currentSongRef.current = state.currentSong;
-              setQueue(state.queue); // This should have the correct queue now
+              setQueue(state.queue);
               setUpNext(state.upNext);
-              console.log('[tv] State updated immediately, queue length:', state.queue.length);
+              console.log('[tv] State updated immediately, queue length:', state.queue.length, 'currentSong:', state.currentSong?.song?.title || 'none');
               
-              // Now try to play immediately (still in video event context)
-              if (state.currentSong?.song?.media_url && videoRef.current) {
+              // Try to play immediately if there's a next song (mobile autoplay)
+              // Only attempt autoplay if user has interacted (mobile requirement)
+              // IMPORTANT: Don't set currentVideoSrcRef here - let video effect handle it
+              // Otherwise the effect will see URL as unchanged and skip loading
+              if (state.currentSong?.song?.media_url && videoRef.current && hasUserInteracted) {
                 const video = videoRef.current;
-                try {
-                  video.src = state.currentSong.song.media_url;
-                  video.load();
-                  await video.play();
-                  console.log('[tv] Next song autoplay succeeded after ended event');
-                  currentVideoSrcRef.current = state.currentSong.song.media_url;
-                } catch (playErr: any) {
-                  console.error('[tv] Failed to autoplay next song:', playErr);
-                  if (playErr.name === 'NotAllowedError') {
-                    console.log('[tv] Autoplay blocked even in event context - showing overlay');
-                    setNeedsUserInteraction(true);
+                const nextMediaUrl = state.currentSong.song.media_url;
+                
+                // Only try to play if this is actually a different URL
+                // (prevents trying to play the same song that just ended)
+                if (currentVideoSrcRef.current !== nextMediaUrl) {
+                  try {
+                    // Set src and load, but DON'T set currentVideoSrcRef yet
+                    // The video effect will set it when it runs
+                    video.src = nextMediaUrl;
+                    video.load();
+                    await video.play();
+                    console.log('[tv] Next song autoplay succeeded after ended event');
+                    // Don't set currentVideoSrcRef here - let video effect handle it
+                  } catch (playErr: any) {
+                    console.error('[tv] Failed to autoplay next song:', playErr);
+                    if (playErr.name === 'NotAllowedError') {
+                      console.log('[tv] Autoplay blocked even in event context - showing overlay');
+                      setNeedsUserInteraction(true);
+                    }
+                    // Video effect will handle loading/playing via polling if autoplay fails
                   }
+                } else {
+                  console.log('[tv] Next song URL same as current - video effect will handle it');
                 }
+              } else if (state.currentSong?.song?.media_url) {
+                // Next song exists but user hasn't interacted yet - let video effect handle it
+                // The video effect will load and attempt play when currentSong changes
+                console.log('[tv] Next song exists, waiting for video effect to handle playback');
+              } else {
+                // No next song - queue is empty
+                console.log('[tv] No next song - queue is empty');
               }
             }
           } catch (stateErr: any) {
             console.error('[tv] Failed to refresh state after advance:', stateErr);
             // Fall back to polling - it will pick up the change via refreshState()
+            // This ensures we don't skip songs even if immediate fetch fails
           }
         } else {
-          // No user interaction yet or no video ref - wait for poll
-          console.log('[tv] Waiting for poll to pick up next song');
+          // No video ref - wait for poll
+          console.log('[tv] No video ref - waiting for poll to pick up next song');
         }
       } catch (err: any) {
         console.error('[tv] Failed to advance playback:', err);
