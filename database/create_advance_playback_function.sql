@@ -8,6 +8,7 @@ RETURNS BOOLEAN AS $$
 DECLARE
   v_current_id UUID;
   v_next_id UUID;
+  v_queue_mode VARCHAR(20);
 BEGIN
   -- 1. Get current playing entry
   SELECT id INTO v_current_id
@@ -24,14 +25,29 @@ BEGIN
     WHERE id = v_current_id;
   END IF;
   
-  -- 3. Get next pending song (ordered by position)
-  SELECT id INTO v_next_id
-  FROM kara_queue
-  WHERE room_id = p_room_id AND status = 'pending'
-  ORDER BY position ASC
-  LIMIT 1;
+  -- 3. Get room's queue_mode
+  SELECT queue_mode INTO v_queue_mode
+  FROM kara_rooms
+  WHERE id = p_room_id;
   
-  -- 4. Start next song (if exists)
+  -- 4. Get next pending song (ordered by queue_mode)
+  IF v_queue_mode = 'round_robin' THEN
+    -- Round-robin: order by round_number first, then position within round
+    SELECT id INTO v_next_id
+    FROM kara_queue
+    WHERE room_id = p_room_id AND status = 'pending'
+    ORDER BY round_number ASC, position ASC
+    LIMIT 1;
+  ELSE
+    -- FIFO: order by position only (default behavior)
+    SELECT id INTO v_next_id
+    FROM kara_queue
+    WHERE room_id = p_room_id AND status = 'pending'
+    ORDER BY position ASC
+    LIMIT 1;
+  END IF;
+  
+  -- 5. Start next song (if exists)
   IF v_next_id IS NOT NULL THEN
     UPDATE kara_queue
     SET 
