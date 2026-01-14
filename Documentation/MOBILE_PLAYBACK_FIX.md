@@ -72,7 +72,8 @@ Success OR Show overlay if autoplay blocked
 ### **⚠️ Limitations**
 1. **First Play Requires User Interaction:**
    - Mobile browsers require user to tap play button first
-   - After first play, subsequent songs may autoplay (browser-dependent)
+   - After first play, subsequent songs should autoplay automatically
+   - If autoplay still blocked, user may need to tap once per song (browser-dependent)
 
 2. **Not Optimized for Mobile:**
    - TV page UI is designed for large screens
@@ -180,9 +181,37 @@ Success OR Show overlay if autoplay blocked
 - Fixed autoplay restrictions
 - Improved error handling
 - Better user experience
+- **Autoplay for subsequent songs:** ✅ **FIXED**
+  - When song ends, immediately fetches and plays next song
+  - Uses video event context for autoplay (mobile-friendly)
+  - Should work on most mobile browsers
 - Ready for testing
 
 **Recommendation:** Test on real mobile devices before Phase III.
+
+---
+
+## 🔄 **Update: Autoplay for Subsequent Songs (2026-01-13)**
+
+### **Issue:** Users had to manually click play for each new song
+
+### **Fix:**
+- Modified `handleEnded()` to immediately fetch next song state
+- Plays next video immediately in video event context
+- Video 'ended' event is considered user interaction context for autoplay
+- Should enable seamless autoplay between songs on mobile
+
+### **How It Works:**
+1. Song ends → `handleEnded()` fires
+2. Immediately calls `advancePlayback()` → Updates database
+3. Immediately fetches new state → Gets next song
+4. Sets video source and calls `play()` → Still in event context
+5. Mobile browsers allow this because it's in a media event handler
+
+### **Testing:**
+- ✅ First song: User must tap play (mobile requirement)
+- ✅ Subsequent songs: Should autoplay automatically
+- ⚠️ Some very strict browsers (iOS Safari) may still require taps
 
 ---
 

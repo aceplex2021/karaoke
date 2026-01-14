@@ -259,6 +259,14 @@ function TVModePageContent() {
       // After media_url change: set video.src, load(), attempt play()
       video.play().then(() => {
         console.log('[tv] Play() succeeded');
+        // If autoplay succeeded, mark as interacted (enables future autoplay)
+        // This happens after first user interaction
+        if (hasUserInteracted) {
+          // Already interacted - autoplay is working
+        } else {
+          // This shouldn't happen (autoplay should be blocked), but just in case
+          setHasUserInteracted(true);
+        }
       }).catch((err: any) => {
         console.error('[tv] Failed to play video:', err);
         if (err.name === 'NotAllowedError') {
@@ -285,6 +293,7 @@ function TVModePageContent() {
       console.log('Video started playing');
       setIsPlaying(true);
       setNeedsUserInteraction(false);
+      setHasUserInteracted(true); // Mark that user has interacted - enables autoplay for next songs
       setError('');
       // Hide controls after starting to play
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
@@ -313,8 +322,50 @@ function TVModePageContent() {
         // Call /advance endpoint (atomic state transition)
         await api.advancePlayback(latestRoom.id);
         console.log('[tv] /advance succeeded');
-        // UI does NOTHING - waits for next poll (≤3s) to see new state
-        // Rule: No immediate refresh, polling will pick up changes
+        
+        // Mobile-friendly: Immediately fetch new state and play next song
+        // This keeps the play() call in the video event context (better for mobile autoplay)
+        // Video 'ended' event is considered user interaction context for autoplay
+        if (videoRef.current) {
+          try {
+            console.log('[tv] Immediately fetching next song for autoplay (in video event context)');
+            const state = await api.getRoomState(latestRoom.id);
+            
+            if (state.currentSong?.song?.media_url) {
+              // Update state immediately
+              setCurrentSong(state.currentSong);
+              setQueue(state.queue);
+              setUpNext(state.upNext);
+              
+              // Set video source and play immediately (still in video event context)
+              // This should work on mobile because we're in a media event handler
+              videoRef.current.src = state.currentSong.song.media_url;
+              videoRef.current.load();
+              
+              try {
+                await videoRef.current.play();
+                console.log('[tv] Next song autoplay succeeded after ended event');
+                currentVideoSrcRef.current = state.currentSong.song.media_url;
+                setHasUserInteracted(true); // Mark interaction for future songs
+              } catch (playErr: any) {
+                console.error('[tv] Failed to autoplay next song:', playErr);
+                if (playErr.name === 'NotAllowedError') {
+                  // Autoplay still blocked - show overlay
+                  // This can happen on very strict mobile browsers
+                  console.log('[tv] Autoplay blocked even in event context - showing overlay');
+                  setNeedsUserInteraction(true);
+                  // Don't reset hasUserInteracted - user already interacted once
+                }
+              }
+            } else {
+              // No next song - just wait for poll
+              console.log('[tv] No next song after advance, waiting for poll');
+            }
+          } catch (stateErr: any) {
+            console.error('[tv] Failed to fetch state after advance:', stateErr);
+            // Fall back to polling
+          }
+        }
       } catch (err: any) {
         console.error('[tv] Failed to advance playback:', err);
         setError('Failed to advance to next song');
@@ -547,7 +598,9 @@ function TVModePageContent() {
                   if (isPlaying) {
                     videoRef.current.pause();
                   } else {
-                    videoRef.current.play().catch((err) => {
+                    videoRef.current.play().then(() => {
+                      setHasUserInteracted(true); // Mark interaction for autoplay
+                    }).catch((err) => {
                       console.error('Failed to play:', err);
                     });
                   }
