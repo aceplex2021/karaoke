@@ -528,6 +528,7 @@ export default function RoomPage() {
   const [searching, setSearching] = useState(false);
   const [addingToQueue, setAddingToQueue] = useState(false);
   const [removingFromQueue, setRemovingFromQueue] = useState(false);
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'search' | 'queue'>('search');
   const [showNameInput, setShowNameInput] = useState(false);
@@ -764,9 +765,9 @@ export default function RoomPage() {
 
     try {
       console.log('[handleRemoveFromQueue] Removing:', { queueItemId: id, songTitle: title, userId: user.id });
-      
+
       await api.removeQueueItem(id, user.id);
-      
+
       // Show success toast
       success(`Removed "${title}" from queue`);
       // UI does NOTHING - waits for next poll to see change
@@ -778,6 +779,24 @@ export default function RoomPage() {
       showError(errorMessage);
     } finally {
       setRemovingFromQueue(false);
+    }
+  };
+
+  const handleReorder = async (queueItemId: string, direction: 'up' | 'down') => {
+    if (!user) return;
+    
+    setReorderingId(queueItemId);
+    
+    try {
+      await api.reorderQueueItem(queueItemId, direction, user.id);
+      success(`Song moved ${direction === 'up' ? 'up' : 'down'}`);
+      // UI will update on next poll (≤2.5s)
+    } catch (err: any) {
+      console.error('[handleReorder] Failed to reorder:', err);
+      const errorMessage = err.message || 'Failed to reorder song';
+      showError(errorMessage);
+    } finally {
+      setReorderingId(null);
     }
   };
 
@@ -1206,44 +1225,98 @@ export default function RoomPage() {
                       )}
                     </div>
                     
-                    {/* Remove Button - More Visible */}
-                    <button
-                      onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
-                      disabled={removingFromQueue}
-                      style={{
-                        padding: '0.5rem',
-                        background: '#dc3545',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: removingFromQueue ? 'not-allowed' : 'pointer',
-                        fontSize: '1.5rem',
-                        lineHeight: 1,
-                        minWidth: '48px',
-                        minHeight: '48px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.2s',
-                        opacity: removingFromQueue ? 0.6 : 1,
-                        flexShrink: 0,
-                        boxShadow: '0 2px 4px rgba(220, 53, 69, 0.3)',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!removingFromQueue) {
-                          e.currentTarget.style.background = '#c82333';
-                          e.currentTarget.style.transform = 'scale(1.1)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!removingFromQueue) {
-                          e.currentTarget.style.background = '#dc3545';
-                          e.currentTarget.style.transform = 'scale(1)';
-                        }
-                      }}
-                      title="Remove song from queue"
-                    >
-                      {removingFromQueue ? '⏳' : '🗑️'}
-                    </button>
+                    {/* Controls: Up/Down Arrows + Remove Button */}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+                      {/* Up Arrow */}
+                      <button
+                        onClick={() => handleReorder(item.id, 'up')}
+                        disabled={reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0}
+                        style={{
+                          padding: '0.5rem',
+                          background: userQueue.findIndex(q => q.id === item.id) === 0 ? '#f5f5f5' : '#0070f3',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0) ? 'not-allowed' : 'pointer',
+                          fontSize: '1.2rem',
+                          lineHeight: 1,
+                          minWidth: '44px',
+                          minHeight: '44px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                          opacity: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0) ? 0.5 : 1,
+                          color: 'white',
+                        }}
+                        title="Move up"
+                      >
+                        ⬆️
+                      </button>
+                      
+                      {/* Down Arrow */}
+                      <button
+                        onClick={() => handleReorder(item.id, 'down')}
+                        disabled={reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1}
+                        style={{
+                          padding: '0.5rem',
+                          background: userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1 ? '#f5f5f5' : '#0070f3',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1) ? 'not-allowed' : 'pointer',
+                          fontSize: '1.2rem',
+                          lineHeight: 1,
+                          minWidth: '44px',
+                          minHeight: '44px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                          opacity: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1) ? 0.5 : 1,
+                          color: 'white',
+                        }}
+                        title="Move down"
+                      >
+                        ⬇️
+                      </button>
+                      
+                      {/* Remove Button */}
+                      <button
+                        onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
+                        disabled={removingFromQueue}
+                        style={{
+                          padding: '0.5rem',
+                          background: '#dc3545',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: removingFromQueue ? 'not-allowed' : 'pointer',
+                          fontSize: '1.5rem',
+                          lineHeight: 1,
+                          minWidth: '48px',
+                          minHeight: '48px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                          opacity: removingFromQueue ? 0.6 : 1,
+                          boxShadow: '0 2px 4px rgba(220, 53, 69, 0.3)',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!removingFromQueue) {
+                            e.currentTarget.style.background = '#c82333';
+                            e.currentTarget.style.transform = 'scale(1.1)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!removingFromQueue) {
+                            e.currentTarget.style.background = '#dc3545';
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }
+                        }}
+                        title="Remove song from queue"
+                      >
+                        {removingFromQueue ? '⏳' : '🗑️'}
+                      </button>
+                    </div>
                   </div>
                 ))
               ) : (

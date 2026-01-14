@@ -227,6 +227,25 @@ export const api = {
     if (!res.ok) throw new Error('Failed to remove from queue');
   },
 
+  async reorderQueueItem(
+    queueItemId: string,
+    direction: 'up' | 'down',
+    userId: string
+  ): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}/reorder`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction, user_id: userId }),
+    });
+    
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `Failed to reorder: ${res.status}`);
+    }
+    
+    return res.json();
+  },
+
   async reorderQueue(
     queueItemId: string,
     newPosition: number,
