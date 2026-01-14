@@ -530,10 +530,13 @@ export default function RoomPage() {
   const [removingFromQueue, setRemovingFromQueue] = useState(false);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'search' | 'queue'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'history'>('search');
   const [showNameInput, setShowNameInput] = useState(false);
   const [showConfirmRemove, setShowConfirmRemove] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null);
+  const [recentSongs, setRecentSongs] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -637,6 +640,38 @@ export default function RoomPage() {
       }
     };
   }, [code]);
+
+  // Fetch recent songs when user is available
+  useEffect(() => {
+    if (!user) return;
+    
+    const fetchRecentSongs = async () => {
+      try {
+        const { history } = await api.getUserRecentSongs(user.id, 20);
+        setRecentSongs(history || []);
+      } catch (error) {
+        console.error('Failed to fetch recent songs:', error);
+      }
+    };
+    
+    fetchRecentSongs();
+  }, [user]);
+
+  // Fetch history when history tab is activated
+  const fetchHistory = useCallback(async () => {
+    if (!user || !room) return;
+    
+    setHistoryLoading(true);
+    try {
+      const { history: historyData } = await api.getUserHistory(user.id, room.id);
+      setHistory(historyData || []);
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+      showError('Failed to load history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [user, room, showError]);
 
   const handleSearch = async () => {
     if (!room) return;
@@ -881,6 +916,21 @@ export default function RoomPage() {
         >
           📋 Queue ({queue.filter((q) => q.status === 'pending').length})
         </button>
+        <button
+          onClick={() => {
+            setActiveTab('history');
+            fetchHistory();
+          }}
+          style={{
+            flex: 1,
+            padding: '1rem',
+            background: activeTab === 'history' ? '#0070f3' : 'transparent',
+            color: activeTab === 'history' ? 'white' : '#333',
+            fontWeight: activeTab === 'history' ? 'bold' : 'normal',
+          }}
+        >
+          📜 History
+        </button>
       </div>
 
       {/* Search Tab */}
@@ -906,6 +956,59 @@ export default function RoomPage() {
           {error && (
             <div style={{ color: '#e00', marginBottom: '1rem', fontSize: '0.9rem' }}>
               {error}
+            </div>
+          )}
+
+          {/* Recent Songs Section */}
+          {recentSongs.length > 0 && (
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
+                🎵 Your Recent Songs (Last 20)
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {recentSongs.map((historyItem) => (
+                  <button
+                    key={historyItem.id}
+                    className="card"
+                    onClick={async () => {
+                      if (!room || !user) return;
+                      try {
+                        // Find the song group for this song
+                        const { results } = await api.searchSongs(historyItem.song?.title || '');
+                        const group = results.find(g => 
+                          g.display_title.toLowerCase() === historyItem.song?.title?.toLowerCase()
+                        );
+                        if (group) {
+                          handleAddToQueue(group);
+                        } else {
+                          showError('Song not found in catalog');
+                        }
+                      } catch (err: any) {
+                        showError(err.message || 'Failed to add song');
+                      }
+                    }}
+                    style={{ 
+                      textAlign: 'left', 
+                      padding: '0.75rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#fff';
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                      {historyItem.song?.title || 'Unknown'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                      {historyItem.song?.artist || 'Unknown'} • {new Date(historyItem.sung_at).toLocaleDateString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1326,6 +1429,77 @@ export default function RoomPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* History Tab */}
+      {activeTab === 'history' && (
+        <div style={{ padding: '1rem' }}>
+          <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
+            📜 Your Song History (Last 12 Months)
+          </h3>
+          
+          {historyLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              Loading history...
+            </div>
+          ) : history.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              No history found. Start singing to build your history!
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {history.map((item) => (
+                <div 
+                  key={item.id} 
+                  className="card" 
+                  style={{ 
+                    padding: '0.75rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                      {item.song?.title || 'Unknown'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                      {item.song?.artist || 'Unknown'} • {new Date(item.sung_at).toLocaleDateString()} • 
+                      {item.times_sung > 1 && ` (${item.times_sung} times)`}
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    onClick={async () => {
+                      if (!room || !user) return;
+                      try {
+                        // Find the song group for this song
+                        const { results } = await api.searchSongs(item.song?.title || '');
+                        const group = results.find(g => 
+                          g.display_title.toLowerCase() === item.song?.title?.toLowerCase()
+                        );
+                        if (group) {
+                          handleAddToQueue(group);
+                        } else {
+                          showError('Song not found in catalog');
+                        }
+                      } catch (err: any) {
+                        showError(err.message || 'Failed to add song');
+                      }
+                    }}
+                    style={{ 
+                      marginLeft: '1rem',
+                      padding: '0.5rem 1rem',
+                      fontSize: '0.9rem',
+                    }}
+                  >
+                    Add to Queue
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

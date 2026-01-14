@@ -262,5 +262,41 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to reorder queue');
   },
+
+  // User preferences
+  async getUserPreferences(userId: string): Promise<{ preferences: any }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/preferences`);
+    if (!res.ok) throw new Error('Failed to fetch preferences');
+    return res.json();
+  },
+
+  async updateUserPreferences(
+    userId: string,
+    preferences: { preferred_language?: string; preferred_version_type?: string | null; auto_add_favorite?: boolean }
+  ): Promise<{ preferences: any }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(preferences),
+    });
+    if (!res.ok) throw new Error('Failed to update preferences');
+    return res.json();
+  },
+
+  // User history
+  async getUserRecentSongs(userId: string, limit: number = 20): Promise<{ history: any[] }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/history/recent?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to fetch recent songs');
+    return res.json();
+  },
+
+  async getUserHistory(userId: string, roomId?: string): Promise<{ history: any[] }> {
+    const url = roomId 
+      ? `${API_BASE}/users/${userId}/history?room_id=${roomId}`
+      : `${API_BASE}/users/${userId}/history`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch history');
+    return res.json();
+  },
 };
 
