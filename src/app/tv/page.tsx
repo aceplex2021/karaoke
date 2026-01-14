@@ -178,15 +178,45 @@ function TVModePageContent() {
 
   /**
    * Manual advance handler for "Play Next" button
+   * On mobile: Immediately fetches new state and plays video in user interaction context
    */
   const handleManualAdvance = async () => {
     if (!room) return;
     
     console.log('[tv] Manual advance triggered');
     try {
+      // Advance playback first
       await api.advancePlayback(room.id);
       console.log('[tv] /advance succeeded (manual)');
-      // UI does NOTHING - waits for next poll (≤3s)
+      
+      // Immediately refresh state to get the new currentSong
+      // Then try to play in the same interaction context (mobile-friendly)
+      const state = await api.getRoomState(room.id);
+      if (state.currentSong?.song?.media_url && videoRef.current) {
+        // Update state immediately
+        setCurrentSong(state.currentSong);
+        setQueue(state.queue);
+        setUpNext(state.upNext);
+        
+        // Set video source and play immediately (still in user interaction context)
+        videoRef.current.src = state.currentSong.song.media_url;
+        videoRef.current.load();
+        try {
+          await videoRef.current.play();
+          console.log('[tv] Video play() succeeded immediately after advance (mobile-friendly)');
+          currentVideoSrcRef.current = state.currentSong.song.media_url;
+        } catch (playErr: any) {
+          console.error('[tv] Failed to play immediately after advance:', playErr);
+          if (playErr.name === 'NotAllowedError') {
+            setNeedsUserInteraction(true);
+            setHasUserInteracted(false);
+          }
+          // Video will retry on next poll or user interaction
+        }
+      } else {
+        // No next song - just wait for poll
+        console.log('[tv] No next song after advance, waiting for poll');
+      }
     } catch (err: any) {
       console.error('[tv] Failed to advance manually:', err);
       setError('Failed to skip to next song');
@@ -237,9 +267,14 @@ function TVModePageContent() {
           setNeedsUserInteraction(true);
           setHasUserInteracted(false);
         } else {
+          // Only auto-advance on actual playback errors (network, codec, etc.)
+          // Not on autoplay restrictions (those are handled above)
+          console.error('[tv] Video playback error (non-autoplay):', err);
           setError(`Failed to play video: ${err.message}`);
-          // On playback error, skip to next song
-          if (room) {
+          // On actual playback error (not autoplay), skip to next song
+          // But only if it's a real error (network, codec, 404, etc.)
+          if (room && err.name !== 'NotAllowedError') {
+            console.log('[tv] Auto-advancing due to playback error');
             api.advancePlayback(room.id).catch(console.error);
           }
         }
@@ -293,18 +328,47 @@ function TVModePageContent() {
 
     const handleError = async (e: any) => {
       console.error('[tv] Video error:', e);
-      setError('Video playback error - skipping to next song');
+      const error = e.target?.error;
       
-      // On error, advance to next song (treat as skip)
-      const latestRoom = roomRef.current;
-      if (latestRoom) {
-        try {
-          await api.advancePlayback(latestRoom.id);
-          console.log('[tv] /advance succeeded after error');
-          // UI does NOTHING - waits for next poll (≤3s)
-        } catch (err) {
-          console.error('[tv] Failed to advance after error:', err);
+      // Check error type - only auto-advance on certain errors
+      if (error) {
+        const errorCode = error.code;
+        const errorMessage = error.message || 'Unknown error';
+        
+        console.error('[tv] Video error details:', { code: errorCode, message: errorMessage });
+        
+        // Error codes:
+        // 1 = MEDIA_ERR_ABORTED (user aborted)
+        // 2 = MEDIA_ERR_NETWORK (network error)
+        // 3 = MEDIA_ERR_DECODE (decode error)
+        // 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (format not supported)
+        
+        // Only auto-advance on network/decode/source errors (not user abort)
+        if (errorCode === 2 || errorCode === 3 || errorCode === 4) {
+          setError(`Video playback error (${errorMessage}) - skipping to next song`);
+          
+          // On actual playback error, advance to next song
+          const latestRoom = roomRef.current;
+          if (latestRoom) {
+            try {
+              await api.advancePlayback(latestRoom.id);
+              console.log('[tv] /advance succeeded after error');
+              // UI does NOTHING - waits for next poll (≤3s)
+            } catch (err) {
+              console.error('[tv] Failed to advance after error:', err);
+            }
+          }
+        } else if (errorCode === 1) {
+          // User aborted - don't auto-advance, just show message
+          console.log('[tv] Video playback aborted by user');
+          setError('Playback stopped');
+        } else {
+          // Unknown error - show but don't auto-advance (let user decide)
+          setError(`Video error: ${errorMessage}`);
         }
+      } else {
+        // No error details - show generic message
+        setError('Video playback error occurred');
       }
     };
 
@@ -835,10 +899,34 @@ function TVModePageContent() {
               onClick={async () => {
                 if (room) {
                   try {
+                    // Advance playback first
                     await api.advancePlayback(room.id);
                     console.log('[tv] Manual start triggered');
+                    
+                    // Immediately refresh state to get the new currentSong
+                    // Then try to play in the same interaction context
+                    const state = await api.getRoomState(room.id);
+                    if (state.currentSong?.song?.media_url && videoRef.current) {
+                      // Set video source and play immediately (still in user interaction context)
+                      videoRef.current.src = state.currentSong.song.media_url;
+                      videoRef.current.load();
+                      try {
+                        await videoRef.current.play();
+                        console.log('[tv] Video play() succeeded immediately (mobile-friendly)');
+                        setCurrentSong(state.currentSong); // Update state
+                      } catch (playErr: any) {
+                        console.error('[tv] Failed to play immediately:', playErr);
+                        if (playErr.name === 'NotAllowedError') {
+                          setNeedsUserInteraction(true);
+                          setHasUserInteracted(false);
+                        }
+                        // Still update state - video will retry on next poll
+                        setCurrentSong(state.currentSong);
+                      }
+                    }
                   } catch (err) {
                     console.error('[tv] Failed to start playback:', err);
+                    setError('Failed to start playback. Please try again.');
                   }
                 }
               }}
