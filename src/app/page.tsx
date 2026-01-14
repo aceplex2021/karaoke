@@ -9,6 +9,7 @@ export default function HomePage() {
   const router = useRouter();
   const [roomName, setRoomName] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [queueMode, setQueueMode] = useState<'round_robin' | 'fifo'>('fifo');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -27,6 +28,7 @@ export default function HomePage() {
         room_name: roomName,
         host_fingerprint: fingerprint,
         host_display_name: displayName || 'Host',
+        queue_mode: queueMode,
       });
 
       // Store room ID in localStorage for persistence (client-side only)
@@ -83,6 +85,74 @@ export default function HomePage() {
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleCreateRoom()}
           />
+        </div>
+
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: 600 }}>
+            Queue Ordering Mode
+          </label>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <label 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                cursor: 'pointer', 
+                padding: '0.75rem', 
+                border: '1px solid #ddd', 
+                borderRadius: '4px', 
+                backgroundColor: queueMode === 'fifo' ? '#f0f8ff' : 'transparent',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              <input
+                type="radio"
+                name="queueMode"
+                value="fifo"
+                checked={queueMode === 'fifo'}
+                onChange={(e) => setQueueMode(e.target.value as 'fifo')}
+                style={{ marginRight: '0.5rem', marginTop: '0.2rem', cursor: 'pointer' }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                  First Come First Serve
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                  Songs play in the order they were added. Simple and straightforward.
+                </div>
+              </div>
+            </label>
+            
+            <label 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                cursor: 'pointer', 
+                padding: '0.75rem', 
+                border: '1px solid #ddd', 
+                borderRadius: '4px', 
+                backgroundColor: queueMode === 'round_robin' ? '#f0f8ff' : 'transparent',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              <input
+                type="radio"
+                name="queueMode"
+                value="round_robin"
+                checked={queueMode === 'round_robin'}
+                onChange={(e) => setQueueMode(e.target.value as 'round_robin')}
+                style={{ marginRight: '0.5rem', marginTop: '0.2rem', cursor: 'pointer' }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                  Round Robin (Fair Rotation)
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                  Each person gets one turn before anyone sings again. Ensures everyone gets equal opportunities.
+                </div>
+              </div>
+            </label>
+          </div>
         </div>
 
         {error && (

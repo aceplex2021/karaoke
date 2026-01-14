@@ -40,7 +40,7 @@ async function generateUniqueRoomCode(): Promise<string> {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as CreateRoomRequest;
-    const { room_name, host_fingerprint, host_display_name } = body;
+    const { room_name, host_fingerprint, host_display_name, queue_mode } = body;
 
     if (!room_name || !host_fingerprint) {
       return NextResponse.json(
@@ -48,6 +48,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Validate queue_mode (default to 'fifo' if invalid or missing)
+    const validModes = ['round_robin', 'fifo'];
+    const selectedMode = queue_mode && validModes.includes(queue_mode) 
+      ? queue_mode 
+      : 'fifo'; // Default to FIFO to maintain current behavior
 
     // Get or create user
     let { data: user } = await supabaseAdmin
@@ -89,6 +95,7 @@ export async function POST(request: NextRequest) {
         room_code: roomCode,
         room_name,
         host_id: user.id,
+        queue_mode: selectedMode, // Add queue mode
       })
       .select()
       .single();

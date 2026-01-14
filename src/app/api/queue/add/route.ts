@@ -29,19 +29,78 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // 1. Calculate next position (simple max + 1)
-    const { data: maxPosData } = await supabaseAdmin
-      .from('kara_queue')
-      .select('position')
-      .eq('room_id', room_id)
-      .in('status', ['pending', 'playing'])
-      .order('position', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // 1. Get room's queue_mode
+    const { data: room, error: roomError } = await supabaseAdmin
+      .from('kara_rooms')
+      .select('queue_mode')
+      .eq('id', room_id)
+      .single();
     
-    const position = (maxPosData?.position || 0) + 1;
+    if (roomError || !room) {
+      console.error('[queue/add] Room fetch error:', roomError);
+      return NextResponse.json(
+        { error: 'Room not found' },
+        { status: 404 }
+      );
+    }
     
-    // 2. Insert into queue (stores version_id ONLY, not song_id)
+    const queueMode = room.queue_mode || 'fifo';
+    
+    // 2. Calculate position using PostgreSQL function (handles both FIFO and round-robin)
+    const { data: positionData, error: posError } = await supabaseAdmin
+      .rpc('calculate_round_robin_position', {
+        p_room_id: room_id,
+        p_user_id: user_id
+      });
+    
+    let position: number;
+    if (posError) {
+      console.error('[queue/add] Position calculation error:', posError);
+      // Fallback to simple max + 1 if function fails
+      const { data: maxPosData } = await supabaseAdmin
+        .from('kara_queue')
+        .select('position')
+        .eq('room_id', room_id)
+        .in('status', ['pending', 'playing'])
+        .order('position', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      position = (maxPosData?.position || 0) + 1;
+    } else {
+      position = positionData as number;
+    }
+    
+    // 3. Calculate round_number for round-robin mode
+    let roundNumber = 1;
+    if (queueMode === 'round_robin') {
+      // Get current round from pending songs
+      const { data: pending } = await supabaseAdmin
+        .from('kara_queue')
+        .select('round_number')
+        .eq('room_id', room_id)
+        .eq('status', 'pending')
+        .order('round_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      const currentRound = pending?.round_number || 1;
+      
+      // Check if user already has a song in current round
+      const { data: userInRound } = await supabaseAdmin
+        .from('kara_queue')
+        .select('id')
+        .eq('room_id', room_id)
+        .eq('user_id', user_id)
+        .eq('status', 'pending')
+        .eq('round_number', currentRound)
+        .limit(1)
+        .maybeSingle();
+      
+      roundNumber = userInRound ? currentRound + 1 : currentRound;
+    }
+    
+    // 4. Insert into queue (stores version_id ONLY, not song_id)
     const { data, error } = await supabaseAdmin
       .from('kara_queue')
       .insert({
@@ -49,6 +108,7 @@ export async function POST(request: NextRequest) {
         version_id,  // ← Single source of truth
         user_id,
         position,
+        round_number: roundNumber,
         status: 'pending'  // Always starts as pending
       })
       .select()

@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS kara_rooms (
     current_entry_id UUID,
     -- Round-robin cursor: last singer who had a turn
     last_singer_id UUID REFERENCES kara_users(id) ON DELETE SET NULL,
+    -- Queue ordering mode: round_robin (fair rotation) or fifo (first come first serve)
+    queue_mode VARCHAR(20) DEFAULT 'fifo' CHECK (queue_mode IN ('round_robin', 'fifo')),
     UNIQUE(room_code)
 );
 

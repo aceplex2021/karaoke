@@ -12,6 +12,7 @@ export interface Room {
   expires_at: string | null;
   current_entry_id: string | null; // Backend-controlled: current playing queue entry
   last_singer_id: string | null; // Round-robin cursor: last singer who had a turn
+  queue_mode: 'round_robin' | 'fifo'; // Queue ordering mode
 }
 
 export interface User {
@@ -130,6 +131,7 @@ export interface CreateRoomRequest {
   room_name: string;
   host_fingerprint: string;
   host_display_name?: string;
+  queue_mode?: 'round_robin' | 'fifo'; // Optional, defaults to 'fifo'
 }
 
 export interface JoinRoomRequest {
