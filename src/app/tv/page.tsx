@@ -385,33 +385,35 @@ function TVModePageContent() {
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
-      {/* Video Player - key={media_url} forces remount on URL change */}
-      <video
-        key={currentSong?.song?.media_url || 'no-video'}
-        ref={videoRef}
-        autoPlay
-        playsInline
-        onEnded={async () => {
-          console.log('[tv] Video onEnded prop fired');
-          // Backup handler - the addEventListener in useEffect is primary
-          const latestRoom = roomRef.current;
-          console.log('[tv] onEnded prop fired for room:', latestRoom?.id);
-          if (latestRoom) {
-            try {
-              await api.advancePlayback(latestRoom.id);
-              console.log('[tv] /advance succeeded (from onEnded prop)');
-              // UI does NOTHING - waits for next poll (≤3s)
-            } catch (err: any) {
-              console.error('[tv] Failed to advance (from prop):', err);
+      {/* Video Container - Full screen */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
+        {/* Video Player - key={media_url} forces remount on URL change */}
+        <video
+          key={currentSong?.song?.media_url || 'no-video'}
+          ref={videoRef}
+          autoPlay
+          playsInline
+          onEnded={async () => {
+            console.log('[tv] Video onEnded prop fired');
+            // Backup handler - the addEventListener in useEffect is primary
+            const latestRoom = roomRef.current;
+            console.log('[tv] onEnded prop fired for room:', latestRoom?.id);
+            if (latestRoom) {
+              try {
+                await api.advancePlayback(latestRoom.id);
+                console.log('[tv] /advance succeeded (from onEnded prop)');
+                // UI does NOTHING - waits for next poll (≤3s)
+              } catch (err: any) {
+                console.error('[tv] Failed to advance (from prop):', err);
+              }
             }
-          }
-        }}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'contain',
-        }}
-      />
+          }}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+          }}
+        />
 
       {/* User Interaction Overlay (for autoplay) */}
       {needsUserInteraction && !hasUserInteracted && (
@@ -511,33 +513,32 @@ function TVModePageContent() {
               {isPlaying ? '⏸' : '▶'}
             </button>
 
-            {/* Skip Button - Always visible, disabled when no next song */}
+            {/* Play Next Button - Moved from song info area */}
             <button
-              onClick={async () => {
-                if (currentSong && room) {
-                  try {
-                    console.log('Skipping current song');
-                    await api.skipSong(currentSong.id, room.id);
-                    // Immediately refresh state (don't wait for polling)
-                    await refreshState(room.id);
-                  } catch (err) {
-                    console.error('Failed to skip song:', err);
-                    setError('Failed to skip song');
-                  }
-                }
-              }}
-              disabled={!currentSong}
+              onClick={handleManualAdvance}
+              disabled={!currentSong && queue.length === 0}
               style={{
                 fontSize: '1.2rem',
                 padding: '0.5rem 1rem',
-                background: currentSong ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.3)',
+                background: (currentSong || queue.length > 0) ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.3)',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: currentSong ? 'pointer' : 'not-allowed',
+                cursor: (currentSong || queue.length > 0) ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (currentSong || queue.length > 0) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentSong || queue.length > 0) {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.2)';
+                }
               }}
             >
-              ⏭ Skip
+              ⏭️ Play Next
             </button>
 
             {/* Volume Control */}
@@ -624,44 +625,20 @@ function TVModePageContent() {
 
           {/* Song Info */}
           {currentSong && (
-            <div style={{ color: 'white', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-                  {currentSong.song?.title || 'Unknown Song'}
-                </div>
-                {currentSong.user && (
-                  <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>
-                    {currentSong.user.display_name || 'Guest'}
-                  </div>
-                )}
+            <div style={{ color: 'white' }}>
+              <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                {currentSong.song?.title || 'Unknown Song'}
               </div>
-              
-              {/* Manual Advance Button */}
-              <button
-                onClick={handleManualAdvance}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  border: '2px solid white',
-                  borderRadius: '8px',
-                  color: 'white',
-                  fontSize: '1rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
-                }}
-              >
-                ⏭️ Play Next
-              </button>
+              {currentSong.user && (
+                <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                  {currentSong.user.display_name || 'Guest'}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+      </div>
 
       {/* Queue Sidebar - Enhanced scrolling for TV browsers */}
       <div
@@ -688,11 +665,38 @@ function TVModePageContent() {
         }}
         className="tv-queue-scroll"
       >
+        {/* QR Code - Positioned at top of queue sidebar, outside video area */}
+        {room && (
+          <div
+            style={{
+              background: 'rgba(255,255,255,0.95)',
+              padding: '0.5rem',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              boxSizing: 'border-box',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+          >
+            <div style={{ fontSize: '0.7rem', marginBottom: '0.3rem', fontWeight: 'bold', textAlign: 'center', color: '#333', width: '100%' }}>
+              {room.room_code}
+            </div>
+            <div style={{ width: '100%', padding: '0.2rem', boxSizing: 'border-box', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'white', borderRadius: '4px' }}>
+              <QRCode url={getQRCodeUrl(room.room_code)} size={80} />
+            </div>
+            <div style={{ fontSize: '0.6rem', marginTop: '0.3rem', color: '#666', textAlign: 'center', width: '100%' }}>
+              Scan to join
+            </div>
+          </div>
+        )}
+        
         <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '1rem', position: 'sticky', top: 0, background: 'rgba(0,0,0,0.8)', paddingBottom: '0.5rem', zIndex: 10 }}>
           Queue ({queue.length})
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingBottom: '1rem' }}>
-          {queue.map((item) => (
+          {queue.slice(0, 3).map((item) => (
             <div
               key={item.id}
               style={{
@@ -857,26 +861,6 @@ function TVModePageContent() {
         </div>
       </div>
 
-      {/* QR Code for joining - Smaller size for less screen real estate */}
-      {room && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            left: '1rem',
-            background: 'rgba(255,255,255,0.95)',
-            padding: '0.75rem',
-            borderRadius: '8px',
-            zIndex: 1000,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          }}
-        >
-          <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 'bold', textAlign: 'center' }}>
-            {room.room_code}
-          </div>
-          <QRCode url={getQRCodeUrl(room.room_code)} size={45} />
-        </div>
-      )}
 
       {/* Error Display */}
       {error && currentSong && (

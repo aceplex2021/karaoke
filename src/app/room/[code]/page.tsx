@@ -1180,64 +1180,70 @@ export default function RoomPage() {
                 userQueue.map((item, index) => (
                   <div
                     key={item.id}
-                    className="card"
                     style={{
                       width: '100%',
-                      overflow: 'visible', // Ensure buttons aren't clipped
+                      background: 'white',
+                      borderRadius: '12px',
+                      padding: '1rem',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'start',
+                      gap: '1rem',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem', width: '100%' }}>
-                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.25rem' }}>
-                          #{index + 1}
-                        </div>
-                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
-                          {item.song?.title}
-                        </div>
-                        {item.song?.artist && (
-                          <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
-                            {item.song.artist}
-                          </div>
-                        )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.25rem' }}>
+                        #{index + 1}
                       </div>
-                      
-                      {/* Remove Button */}
-                      <button
-                        onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
-                        disabled={removingFromQueue}
-                        style={{
-                          padding: '0.5rem',
-                          background: '#fff',
-                          border: '2px solid #dc3545',
-                          borderRadius: '8px',
-                          cursor: removingFromQueue ? 'not-allowed' : 'pointer',
-                          fontSize: '1.25rem',
-                          lineHeight: 1,
-                          minWidth: '44px',
-                          minHeight: '44px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          transition: 'all 0.2s',
-                          opacity: removingFromQueue ? 0.6 : 1,
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!removingFromQueue) {
-                            e.currentTarget.style.background = '#dc3545';
-                            e.currentTarget.style.color = 'white';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!removingFromQueue) {
-                            e.currentTarget.style.background = '#fff';
-                            e.currentTarget.style.color = '#dc3545';
-                          }
-                        }}
-                        title="Remove song from queue"
-                      >
-                        {removingFromQueue ? '⏳' : '🗑️'}
-                      </button>
+                      <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
+                        {item.song?.title}
+                      </div>
+                      {item.song?.artist && (
+                        <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
+                          {item.song.artist}
+                        </div>
+                      )}
                     </div>
+                    
+                    {/* Remove Button - More Visible */}
+                    <button
+                      onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
+                      disabled={removingFromQueue}
+                      style={{
+                        padding: '0.5rem',
+                        background: '#dc3545',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: removingFromQueue ? 'not-allowed' : 'pointer',
+                        fontSize: '1.5rem',
+                        lineHeight: 1,
+                        minWidth: '48px',
+                        minHeight: '48px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.2s',
+                        opacity: removingFromQueue ? 0.6 : 1,
+                        flexShrink: 0,
+                        boxShadow: '0 2px 4px rgba(220, 53, 69, 0.3)',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!removingFromQueue) {
+                          e.currentTarget.style.background = '#c82333';
+                          e.currentTarget.style.transform = 'scale(1.1)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!removingFromQueue) {
+                          e.currentTarget.style.background = '#dc3545';
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }
+                      }}
+                      title="Remove song from queue"
+                    >
+                      {removingFromQueue ? '⏳' : '🗑️'}
+                    </button>
                   </div>
                 ))
               ) : (
