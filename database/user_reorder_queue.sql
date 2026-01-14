@@ -11,12 +11,12 @@ RETURNS BOOLEAN AS $$
 DECLARE
     v_queue_item RECORD;
     v_room_id UUID;
-    v_user_songs RECORD[];
     v_current_index INTEGER;
     v_target_index INTEGER;
     v_target_song RECORD;
     v_temp_position INTEGER;
     v_user_song_ids UUID[];
+    v_total_count INTEGER;
 BEGIN
     -- Get queue item and verify ownership
     SELECT * INTO v_queue_item
@@ -39,6 +39,13 @@ BEGIN
     AND user_id = p_user_id
     AND status = 'pending';
     
+    -- Check if array is null or empty
+    IF v_user_song_ids IS NULL OR array_length(v_user_song_ids, 1) IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    v_total_count := array_length(v_user_song_ids, 1);
+    
     -- Find current index
     v_current_index := array_position(v_user_song_ids, p_queue_item_id);
     
@@ -54,7 +61,7 @@ BEGIN
         END IF;
     ELSIF p_direction = 'down' THEN
         v_target_index := v_current_index + 1;
-        IF v_target_index > array_length(v_user_song_ids, 1) THEN
+        IF v_target_index > v_total_count THEN
             RETURN FALSE; -- Already at bottom
         END IF;
     ELSE
