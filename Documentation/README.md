@@ -2,6 +2,19 @@
 
 A web-only karaoke system designed to replace YouTube karaoke at house parties. Works on phones, TVs, tablets, and laptops with no native apps required.
 
+---
+
+## 🛡️ **IMPORTANT: Development Process**
+
+**Before making ANY code changes, read:**
+- **[DEVELOPMENT_PROCESS.md](./DEVELOPMENT_PROCESS.md)** - **MANDATORY PROCESS** for all fixes
+- **[FIX_WORKFLOW.md](./FIX_WORKFLOW.md)** - Quick reference guide
+- **[ISSUE_FIX_TEMPLATE.md](./ISSUE_FIX_TEMPLATE.md)** - Template for documenting issues
+
+**This process prevents regressions and ensures stability. It is mandatory, not optional.**
+
+---
+
 ## Features
 
 - **TV Mode**: Persistent room display with auto-playing video queue

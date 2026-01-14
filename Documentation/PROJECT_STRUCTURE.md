@@ -42,7 +42,12 @@ karaoke/
 ├── tsconfig.backend.json      # TypeScript config (backend)
 ├── README.md                  # Main documentation
 ├── SETUP.md                   # Setup instructions
-└── PROJECT_STRUCTURE.md       # This file
+├── PROJECT_STRUCTURE.md       # This file
+└── Documentation/
+    ├── DEVELOPMENT_PROCESS.md # 🛡️ MANDATORY: Safe fix process
+    ├── FIX_WORKFLOW.md        # Quick reference for fixes
+    ├── ISSUE_FIX_TEMPLATE.md  # Template for documenting issues
+    └── ...                     # Other documentation
 ```
 
 ## Key Components
@@ -91,4 +96,14 @@ Uses Supabase Realtime subscriptions:
 - TV subscribes to queue changes
 - Phones subscribe to queue updates
 - All devices stay in sync automatically
+
+## Development Process
+
+**🛡️ MANDATORY:** All code changes must follow the safe fix process:
+- See `Documentation/DEVELOPMENT_PROCESS.md` for the complete process
+- Use `scripts/create-checkpoint.ps1` to create safety checkpoints
+- Always document issues using `Documentation/ISSUE_FIX_TEMPLATE.md`
+- Run regression tests after every fix
+
+This process prevents regressions and ensures stability.
 

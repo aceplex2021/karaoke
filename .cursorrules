@@ -1,0 +1,38 @@
+# Cursor Rules for Karaoke Web App
+
+## 🛡️ MANDATORY: Development Process
+
+**Before making ANY code changes, you MUST:**
+
+1. **Document the issue** using `Documentation/ISSUE_FIX_TEMPLATE.md`
+2. **Map dependencies** - What could break?
+3. **Create test plan** - How to verify fix + regression?
+4. **Get approval** - Review and approve approach
+5. **Create checkpoint** - Use `npm run checkpoint "issue description"` or `.\scripts\create-checkpoint.ps1 "issue description"`
+6. **Make isolated change** - Only what's needed, nothing else
+7. **Test immediately** - Fix works + regression tests pass
+8. **Commit or rollback** - Based on test results
+
+**Reference Documents:**
+- `Documentation/DEVELOPMENT_PROCESS.md` - Complete mandatory process
+- `Documentation/FIX_WORKFLOW.md` - Quick reference
+- `Documentation/QUICK_REFERENCE.md` - One-page checklist
+- `Documentation/ISSUE_FIX_TEMPLATE.md` - Issue documentation template
+
+**This process is MANDATORY to prevent regressions. Never skip steps.**
+
+## Code Quality Rules
+
+- One issue = One branch = One fix
+- Never mix fixes
+- Never "improve" unrelated code
+- Always test before and after
+- Always create checkpoints before changes
+- Always run regression tests
+
+## When in Doubt
+
+- Follow the process
+- Document everything
+- Test thoroughly
+- Ask before proceeding if unsure
