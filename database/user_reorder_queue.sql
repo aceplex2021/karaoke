@@ -81,15 +81,20 @@ BEGIN
         RETURN FALSE;
     END IF;
     
-    -- Swap positions atomically
+    -- Swap positions and round_numbers atomically
+    -- This ensures round-robin ordering is maintained after reordering
     v_temp_position := v_queue_item.position;
     
     UPDATE kara_queue
-    SET position = v_target_song.position
+    SET 
+      position = v_target_song.position,
+      round_number = v_target_song.round_number
     WHERE id = p_queue_item_id;
     
     UPDATE kara_queue
-    SET position = v_temp_position
+    SET 
+      position = v_temp_position,
+      round_number = v_queue_item.round_number
     WHERE id = v_target_song.id;
     
     RETURN TRUE;
