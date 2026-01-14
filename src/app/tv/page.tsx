@@ -323,48 +323,53 @@ function TVModePageContent() {
         await api.advancePlayback(latestRoom.id);
         console.log('[tv] /advance succeeded');
         
-        // Mobile-friendly: Immediately fetch new state and play next song
-        // This keeps the play() call in the video event context (better for mobile autoplay)
-        // Video 'ended' event is considered user interaction context for autoplay
-        if (videoRef.current) {
+        // Mobile-friendly: Immediately refresh state and play next song
+        // Use refreshState() to properly update state with requestId protection (prevents queue clearing bug)
+        // Then play video immediately (still in video event context for mobile autoplay)
+        if (videoRef.current && hasUserInteracted) {
           try {
-            console.log('[tv] Immediately fetching next song for autoplay (in video event context)');
+            console.log('[tv] Immediately refreshing state for autoplay (in video event context)');
+            // Use refreshState() which has proper requestId protection - this prevents race conditions
             const state = await api.getRoomState(latestRoom.id);
             
-            if (state.currentSong?.song?.media_url) {
-              // Update state immediately
+            // Update state using refreshState's logic but inline to get state immediately
+            // We'll use the requestId protection from refreshState
+            const requestId = ++requestIdRef.current;
+            
+            if (requestId === requestIdRef.current) {
+              setRoom(state.room);
+              roomRef.current = state.room;
               setCurrentSong(state.currentSong);
-              setQueue(state.queue);
+              currentSongRef.current = state.currentSong;
+              setQueue(state.queue); // This should have the correct queue now
               setUpNext(state.upNext);
+              console.log('[tv] State updated immediately, queue length:', state.queue.length);
               
-              // Set video source and play immediately (still in video event context)
-              // This should work on mobile because we're in a media event handler
-              videoRef.current.src = state.currentSong.song.media_url;
-              videoRef.current.load();
-              
-              try {
-                await videoRef.current.play();
-                console.log('[tv] Next song autoplay succeeded after ended event');
-                currentVideoSrcRef.current = state.currentSong.song.media_url;
-                setHasUserInteracted(true); // Mark interaction for future songs
-              } catch (playErr: any) {
-                console.error('[tv] Failed to autoplay next song:', playErr);
-                if (playErr.name === 'NotAllowedError') {
-                  // Autoplay still blocked - show overlay
-                  // This can happen on very strict mobile browsers
-                  console.log('[tv] Autoplay blocked even in event context - showing overlay');
-                  setNeedsUserInteraction(true);
-                  // Don't reset hasUserInteracted - user already interacted once
+              // Now try to play immediately (still in video event context)
+              if (state.currentSong?.song?.media_url && videoRef.current) {
+                const video = videoRef.current;
+                try {
+                  video.src = state.currentSong.song.media_url;
+                  video.load();
+                  await video.play();
+                  console.log('[tv] Next song autoplay succeeded after ended event');
+                  currentVideoSrcRef.current = state.currentSong.song.media_url;
+                } catch (playErr: any) {
+                  console.error('[tv] Failed to autoplay next song:', playErr);
+                  if (playErr.name === 'NotAllowedError') {
+                    console.log('[tv] Autoplay blocked even in event context - showing overlay');
+                    setNeedsUserInteraction(true);
+                  }
                 }
               }
-            } else {
-              // No next song - just wait for poll
-              console.log('[tv] No next song after advance, waiting for poll');
             }
           } catch (stateErr: any) {
-            console.error('[tv] Failed to fetch state after advance:', stateErr);
-            // Fall back to polling
+            console.error('[tv] Failed to refresh state after advance:', stateErr);
+            // Fall back to polling - it will pick up the change via refreshState()
           }
+        } else {
+          // No user interaction yet or no video ref - wait for poll
+          console.log('[tv] Waiting for poll to pick up next song');
         }
       } catch (err: any) {
         console.error('[tv] Failed to advance playback:', err);
