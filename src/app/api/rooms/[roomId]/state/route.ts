@@ -105,8 +105,10 @@ export async function GET(
       }
     }
     
-    // 3. Get pending queue (ordered by position)
-    const { data: queueData, error: queueError } = await supabaseAdmin
+    // 3. Get pending queue (ordered by queue_mode)
+    // Round-robin: order by round_number first, then position
+    // FIFO: order by position only
+    const { data: queueDataRaw, error: queueError } = await supabaseAdmin
       .from('kara_queue')
       .select(`
         *,
@@ -120,6 +122,18 @@ export async function GET(
       .eq('room_id', roomId)
       .eq('status', 'pending')
       .order('position', { ascending: true });
+    
+    // Sort by queue_mode: round-robin needs round_number first, then position
+    const queueData = queueDataRaw ? (room.queue_mode === 'round_robin'
+      ? [...queueDataRaw].sort((a, b) => {
+          const roundA = a.round_number || 0;
+          const roundB = b.round_number || 0;
+          if (roundA !== roundB) {
+            return roundA - roundB;
+          }
+          return (a.position || 0) - (b.position || 0);
+        })
+      : queueDataRaw) : null;
     
     if (queueError) {
       console.error('[state] Queue query error:', queueError);

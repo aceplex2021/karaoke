@@ -46,6 +46,7 @@ function TVModePageContent() {
   const currentVideoSrcRef = useRef<string | null>(null);
   const currentSongRef = useRef<QueueItem | null>(null);
   const roomRef = useRef<Room | null>(null);
+  const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -211,24 +212,29 @@ function TVModePageContent() {
 
     const video = videoRef.current;
     const mediaUrl = currentSong.song.media_url;
+    const queueItemId = currentSong.id;
 
-    // Only reload if the URL actually changed
-    if (currentVideoSrcRef.current === mediaUrl) {
-      console.log('[tv] Video URL unchanged, skipping reload:', mediaUrl);
+    // Only reload if the URL OR queue item ID actually changed
+    // This ensures we reload when a different queue item (even with same media_url) becomes current
+    if (currentVideoSrcRef.current === mediaUrl && playingQueueItemIdRef.current === queueItemId) {
+      console.log('[tv] Video URL and queue item ID unchanged, skipping reload:', mediaUrl, queueItemId);
       return;
     }
 
-    // Update tracked URL and reload
-    console.log('[tv] set video src:', mediaUrl);
+    // Update tracked URL and queue item ID, then reload
+    console.log('[tv] set video src:', mediaUrl, 'for queue item:', queueItemId);
     currentVideoSrcRef.current = mediaUrl;
+    playingQueueItemIdRef.current = queueItemId;
     video.src = mediaUrl;
     video.load();
 
     const handleLoadedData = () => {
-      console.log('[tv] Video loaded, attempting to play');
+      console.log('[tv] Video loaded, attempting to play for queue item:', queueItemId);
       // After media_url change: set video.src, load(), attempt play()
       video.play().then(() => {
-        console.log('[tv] Play() succeeded');
+        console.log('[tv] Play() succeeded for queue item:', queueItemId);
+        // Mark this queue item as the one actually playing
+        playingQueueItemIdRef.current = queueItemId;
       }).catch((err: any) => {
         console.error('[tv] Failed to play video:', err);
         if (err.name === 'NotAllowedError') {
@@ -267,17 +273,32 @@ function TVModePageContent() {
       console.log('[tv] onEnded fired');
       // Use refs to get latest values (not closure values)
       const latestRoom = roomRef.current;
+      const latestCurrentSong = currentSongRef.current;
+      const playingQueueItemId = playingQueueItemIdRef.current;
       
       if (!latestRoom) {
         console.warn('[tv] onEnded fired but no room');
         return;
       }
       
-      console.log('[tv] Calling /advance for room:', latestRoom.id);
+      // CRITICAL: Verify that the ended video matches the DB's current song
+      // This prevents marking wrong songs as completed when video element is out of sync
+      if (latestCurrentSong && playingQueueItemId !== latestCurrentSong.id) {
+        console.warn('[tv] onEnded fired but video element is playing different song:', {
+          playingQueueItemId,
+          currentSongId: latestCurrentSong.id,
+          message: 'Ignoring onEnded - video element out of sync with DB'
+        });
+        return;
+      }
+      
+      console.log('[tv] onEnded verified - calling /advance for room:', latestRoom.id, 'queue item:', playingQueueItemId);
       try {
         // Call /advance endpoint (atomic state transition)
         await api.advancePlayback(latestRoom.id);
         console.log('[tv] /advance succeeded');
+        // Clear playing queue item ID since we've advanced
+        playingQueueItemIdRef.current = null;
         // UI does NOTHING - waits for next poll (≤3s) to see new state
         // Rule: No immediate refresh, polling will pick up changes
       } catch (err: any) {
@@ -336,13 +357,13 @@ function TVModePageContent() {
       video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
-      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('ended', handleEndedWrapper);
       video.removeEventListener('error', handleError);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
     };
-  }, [currentSong?.song?.media_url, room, volume]);
+  }, [currentSong?.id, currentSong?.song?.media_url, room, volume]);
 
   // Mouse movement to show controls
   useEffect(() => {
@@ -393,21 +414,7 @@ function TVModePageContent() {
           ref={videoRef}
           autoPlay
           playsInline
-          onEnded={async () => {
-            console.log('[tv] Video onEnded prop fired');
-            // Backup handler - the addEventListener in useEffect is primary
-            const latestRoom = roomRef.current;
-            console.log('[tv] onEnded prop fired for room:', latestRoom?.id);
-            if (latestRoom) {
-              try {
-                await api.advancePlayback(latestRoom.id);
-                console.log('[tv] /advance succeeded (from onEnded prop)');
-                // UI does NOTHING - waits for next poll (≤3s)
-              } catch (err: any) {
-                console.error('[tv] Failed to advance (from prop):', err);
-              }
-            }
-          }}
+          // onEnded is handled by addEventListener in useEffect (with verification)
           style={{
             width: '100%',
             height: '100%',

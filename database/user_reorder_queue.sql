@@ -12,10 +12,12 @@ DECLARE
     v_lock_key BIGINT;
     v_queue_item RECORD;
     v_room_id UUID;
+    v_queue_mode VARCHAR(20);
     v_current_index INTEGER;
     v_target_index INTEGER;
     v_target_song RECORD;
     v_temp_position INTEGER;
+    v_temp_round_number INTEGER;
     v_user_song_ids UUID[];
     v_total_count INTEGER;
 BEGIN
@@ -32,6 +34,11 @@ BEGIN
     END IF;
     
     v_room_id := v_queue_item.room_id;
+    
+    -- Get room's queue_mode to determine if we need to handle round_number
+    SELECT queue_mode INTO v_queue_mode
+    FROM kara_rooms
+    WHERE id = v_room_id;
     
     -- Acquire advisory lock to prevent advance_playback from running during swap
     -- This prevents race conditions where advance_playback sees inconsistent position state
@@ -87,18 +94,36 @@ BEGIN
         RETURN FALSE;
     END IF;
     
-    -- Simple position swap: swap positions of two adjacent songs in user's list
-    -- This updates the global queue order (TV queue orders by position ASC)
-    -- round_number is NOT swapped (it represents global round order)
+    -- Swap positions of two adjacent songs in user's list
+    -- In round-robin mode: also swap round_number to maintain correct round ordering
+    -- In FIFO mode: only swap positions (round_number stays 1)
     v_temp_position := v_queue_item.position;
+    v_temp_round_number := v_queue_item.round_number;
     
     -- Atomic swap using very high temporary position to avoid conflicts
     -- Advisory lock ensures advance_playback cannot run during this swap
-    -- All three updates happen in the same transaction (atomic)
+    -- All updates happen in the same transaction (atomic)
     -- Using 2147483647 (max INTEGER) ensures it's always last in ORDER BY position ASC
-    UPDATE kara_queue SET position = 2147483647 WHERE id = p_queue_item_id;
-    UPDATE kara_queue SET position = v_temp_position WHERE id = v_target_song.id;
-    UPDATE kara_queue SET position = v_target_song.position WHERE id = p_queue_item_id;
+    IF v_queue_mode = 'round_robin' THEN
+        -- Round-robin: swap both position AND round_number
+        -- This ensures that when positions change, round ordering is preserved correctly
+        UPDATE kara_queue 
+        SET position = 2147483647, round_number = 2147483647 
+        WHERE id = p_queue_item_id;
+        
+        UPDATE kara_queue 
+        SET position = v_temp_position, round_number = v_temp_round_number 
+        WHERE id = v_target_song.id;
+        
+        UPDATE kara_queue 
+        SET position = v_target_song.position, round_number = v_target_song.round_number 
+        WHERE id = p_queue_item_id;
+    ELSE
+        -- FIFO: only swap positions (round_number is always 1, no need to swap)
+        UPDATE kara_queue SET position = 2147483647 WHERE id = p_queue_item_id;
+        UPDATE kara_queue SET position = v_temp_position WHERE id = v_target_song.id;
+        UPDATE kara_queue SET position = v_target_song.position WHERE id = p_queue_item_id;
+    END IF;
     
     RETURN TRUE;
 END;
