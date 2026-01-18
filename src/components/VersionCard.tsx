@@ -130,13 +130,31 @@ export function VersionCard({ version, onAddToQueue, isActive = false, onPreview
         border: isActive ? '2px solid #2196F3' : '1px solid #e0e0e0',
       }}
     >
-      {/* Video Container (hidden, audio only) */}
-      <video
-        ref={videoRef}
-        style={{ display: 'none' }}
-        preload="metadata"
-        playsInline
-      />
+      {/* Video Preview (visible during playback) */}
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          paddingBottom: '56.25%', // 16:9 aspect ratio
+          backgroundColor: '#000',
+          overflow: 'hidden',
+          display: isPlaying ? 'block' : 'none',
+        }}
+      >
+        <video
+          ref={videoRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+          }}
+          preload="metadata"
+          playsInline
+        />
+      </div>
 
       {/* Card Content */}
       <div style={{ padding: '16px' }}>
