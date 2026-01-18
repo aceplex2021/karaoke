@@ -75,12 +75,16 @@ export interface SearchSongsResponse {
 
 export interface GroupVersion {
   version_id: string;
-  label: string | null; // Mixer type (nam, nu, nam_nu, beat, etc.)
-  tone: string | null;
-  pitch: string | null;
+  label: string | null; // Raw label for backward compatibility
+  tone: string | null; // Clean tone: Nam or Nữ
+  pitch: string | null; // Musical key
   tempo: number | null; // BPM
+  style: string | null; // Style: Beat, Bolero, Ballad, Remix, etc.
+  channel: string | null; // Channel/mixer name (e.g., Trọng Hiếu, Kim Quy)
+  performance_type: string; // Format: solo, duet, group, medley
+  artist_name: string | null; // Artist/composer name
   is_default: boolean; // Recommended version flag
-  styles: string[];
+  styles: string[]; // For backward compatibility
   duration_s: number | null;
   file: VersionFile;
 }
@@ -142,8 +146,8 @@ export interface JoinRoomRequest {
 
 export interface AddToQueueRequest {
   room_id: string;
-  song_id?: string; // Legacy: for backward compatibility
-  version_id?: string; // New: preferred way to add songs
+  song_id?: string; // For History/Favorites: backend will select default version
+  version_id?: string; // For Search: precise version selection
   user_id: string;
 }
 

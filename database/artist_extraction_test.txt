@@ -1,0 +1,112 @@
+BEGIN
+CREATE FUNCTION
+COMMIT
+            section             |                                                        storage_path                                                         | extracted_artist 
+--------------------------------+-----------------------------------------------------------------------------------------------------------------------------+------------------
+ === ARTIST EXTRACTION TEST === | /Videos/Con Đường Xưa Em Đi Karaoke Song Ca Nhạc Sống Dễ Hát 2025 ｜ Trọng Hiếu__song_ca.mp4                                | 
+ === ARTIST EXTRACTION TEST === | /Videos/Chuyện Ba Mùa Mưa Karaoke Tone Nam Nhạc Sống 2021 ｜ Trọng Hiếu__nam.mp4                                            | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Nhạc Sống Nửa Bài Tone Nam ｜ Liên khúc Bolero Nhạc Trữ Tình Thịnh Hành - Lại Nhớ Người Yêu__nam_bolero.mp4 | 
+ === ARTIST EXTRACTION TEST === | /Videos/ANH CHO EM MÙA XUÂN - KARAOKE - Tone NỮ ( E⧸Mi Trưởng )__nu.mp4                                                     | 
+ === ARTIST EXTRACTION TEST === | /Videos/Hua Yuan 花愿【Flower Wish】– Wang An Yu 王安宇《OST 神隐The Last Immortal》Karaoke [ C!卡拉OK! ].mp4               | 
+ === ARTIST EXTRACTION TEST === | /Videos/Hồi Chuông Xóm Đạo Karaoke Tone Nam Nhạc Sống 2022 ｜ Trọng Hiếu__nam.mp4                                           | 
+ === ARTIST EXTRACTION TEST === | /Videos/Ben E. King - Stand By Me (Karaoke Version).f136.mp4                                                                | 
+ === ARTIST EXTRACTION TEST === | /Videos/TÌNH CA NGƯỜI MẤT TRÍ - KARAOKE - Tone NAM ( G⧸Sol trưởng ).mp4                                                     | 
+ === ARTIST EXTRACTION TEST === | /Videos/Biển Nỗi Nhớ Và Em Karaoke Tone Nam__nam.mp4                                                                        | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke TUỔI XA NGƯỜI (Từ Công Phụng) Slow Ballad - Tone NAM (Ab⧸La giáng) KIM QUY KARAOKE.mp4                      | Từ Công Phụng
+ === ARTIST EXTRACTION TEST === | /Videos/Sing King Soundcheck Episode 11__c56e88faa.mp4                                                                      | 
+ === ARTIST EXTRACTION TEST === | /Videos/Ngày Đó Xa Rồi Karaoke Song Ca ｜ Trọng Hiếu__song_ca.mp4                                                           | 
+ === ARTIST EXTRACTION TEST === | /Videos/Đám Cưới Đầu Xuân Karaoke Tone Nữ Nhạc Sống ｜ Trọng Hiếu__nu.mp4                                                   | 
+ === ARTIST EXTRACTION TEST === | /Videos/Nối Lại Tình Xưa Karaoke Song Ca Âm Thanh Nhạc Sống Siêu Hay ｜ Trọng HIếu__song_ca.mp4                             | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Bolero Tone Nữ ｜ Hai Mùa Mưa - Gõ Cửa Trái Tim__nu_bolero.mp4                      | 
+ === ARTIST EXTRACTION TEST === | /Videos/Cơn Đau Cuối Cùng - Lê Hiếu「Official Lyric Video」.mp4                                                             | 
+ === ARTIST EXTRACTION TEST === | /Videos/Taylor Swift - The Fate Of Ophelia (Backing Track Visualizer).mp4                                                   | Taylor Swift
+ === ARTIST EXTRACTION TEST === | /Videos/KittenSneeze, Michael Kovach, Amanda Hufford, CLOUDSAVE - Abstraction (Big Band Version) (Karaoke)__cf0f68542.mp4   | Big Band Version
+ === ARTIST EXTRACTION TEST === | /Videos/Survivor - Eye Of The Tiger (Karaoke Version).mp4                                                                   | Survivor
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Và Tôi Cũng Yêu Em Tone Nam ｜ Nam Trân__nam__cdc0b86d0.mp4                                                 | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Tìm Đâu Tone Nam Nhạc Sống gia huy beat__nam.mp4                                                            | 
+ === ARTIST EXTRACTION TEST === | /Videos/Mười Năm Tình Cũ Karaoke Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                                  | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Hoa Trinh Nữ Tone Nữ ｜ Nam Trân__nam.mp4                                                                   | 
+ === ARTIST EXTRACTION TEST === | /Videos/KARAOKE ｜ Rất Lâu Rồi Mới Khóc - Mochiii Cover ｜ Beat Rumba Tone Nữ__nu.mp4                                       | Mochiii
+ === ARTIST EXTRACTION TEST === | /Videos/DƯ ÂM - KARAOKE - Tone NỮ Trầm ( A⧸La trưởng )__nu.mp4                                                              | 
+ === ARTIST EXTRACTION TEST === | /Videos/Đường Tím Bằng Lăng Karaoke Tone Nam Nhạc Sống 2023 ｜ Trọng Hiếu__nam.mp4                                          | 
+ === ARTIST EXTRACTION TEST === | /Videos/KARAOKE Ngàn Thu Áo Tím - Khiêu Vũ điệu Valse - Tone NAM Trầm ( Bb⧸Si giáng ).mp4                                   | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Chuyến Xe Lam Chiều Tone Nữ Nhạc Sống ｜ Trọng Hiếu__nu.mp4                                                 | 
+ === ARTIST EXTRACTION TEST === | /Videos/TÔI VỚI TRỜI BƠ VƠ - KARAOKE - Tone NỮ Trầm ( D⧸Rê Trưởng )__nu__ce7a05855.mp4                                      | 
+ === ARTIST EXTRACTION TEST === | /Videos/Thuyền Hoa Karaoke Tone Nữ Nhạc Sống ｜ Beat Mới Dễ Hát Âm Thanh Chuẩn ｜ Trọng Hiếu__nu.mp4                        | 
+ === ARTIST EXTRACTION TEST === | /Videos/Tình Chết Theo Mùa Đông Karaoke Tone Nam Nhạc Sống - Phối Mới Dễ Hát - Nhật Nguyễn__nam.mp4                         | 
+ === ARTIST EXTRACTION TEST === | /Videos/KARAOKE - AI VỀ SÔNG TƯƠNG - Tone NỮ ( Eb⧸Mi giáng )__nu.mp4                                                        | KARAOKE
+ === ARTIST EXTRACTION TEST === | /Videos/Nếu Anh Đừng Hẹn Karaoke Tone Nam Nhạc Sống 2021 ｜ Trọng Hiếu__nam.mp4                                             | 
+ === ARTIST EXTRACTION TEST === | /Videos/Nursery Rhyme - Row Row Row Your Boat (Karaoke Version).mp4                                                         | Nursery Rhyme
+ === ARTIST EXTRACTION TEST === | /Videos/karaoke Đoản Xuân Ca Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                                      | 
+ === ARTIST EXTRACTION TEST === | /Videos/Vùng Lá Me Bay Karaoke Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                                    | 
+ === ARTIST EXTRACTION TEST === | /Videos/The Mavericks - Here Comes My Baby (Karaoke Version) with Lyrics On Screen.mp4                                      | The Mavericks
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Đắp mộ cuộc tình Tone Nam Nhạc Sống gia huy beat__nam.mp4                                                   | 
+ === ARTIST EXTRACTION TEST === | /Videos/Vó Ngựa Trên Đồi Cỏ Non Karaoke Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                           | 
+ === ARTIST EXTRACTION TEST === | /Videos/Xin Trả Tôi Về Karaoke Tone Nam ( Em ) Nhạc Sống 2025 ｜ Trọng Hiếu__nam.mp4                                        | 
+ === ARTIST EXTRACTION TEST === | /Videos/HÁT CHO NGƯỜI NẰM XUỐNG - KARAOKE - Tone NỮ ( Dm⧸Rê Thứ )__nu.mp4                                                   | 
+ === ARTIST EXTRACTION TEST === | /Videos/ĐỂ QUÊN CON TIM - KARAOKE - Tone NỮ Soprano ( E⧸Mi trưởng )__nu.mp4                                                 | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke HÃY YÊU NHƯ CHƯA YÊU LẦN NÀO - Lê Hựu Hà -Slow -Tone NỮ Soprano(Bb⧸Si giáng) KIM QUY Karaoke__nu.mp4        | 
+ === ARTIST EXTRACTION TEST === | /Videos/Justin Bieber - One Less Lonely Girl (Karaoke Version).mp4                                                          | Justin Bieber
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Tàu Về Quê Hương Tone Nữ Nhạc Sống ｜ Trọng Hiếu__nu.mp4                                                    | 
+ === ARTIST EXTRACTION TEST === | /Videos/Duyên Kiếp Karaoke Tone Nữ Nhạc Sống 2021 ｜ Trọng Hiếu__nu.mp4                                                     | 
+ === ARTIST EXTRACTION TEST === | /Videos/Karaoke Mười Năm Tình Cũ (Phối Chuẩn 2025) Tone Nam ｜ Nam Trân__nam.mp4                                            | Phối Chuẩn 2025
+ === ARTIST EXTRACTION TEST === | /Videos/Sầu Tương Tư Karaoke Tone Nam ( Fm ) Nhạc Sống Dễ Hát ｜ Trọng Hiếu__nam.mp4                                        | 
+ === ARTIST EXTRACTION TEST === | /Videos/KARAOKE TÌNH KHÚC BUỒN ( NGô Thụy Miên ) Tone NAM Trầm ( Gm⧸Sol Thứ ).mp4                                           | NGô Thụy Miên
+ === ARTIST EXTRACTION TEST === | /Videos/Trách Ai Vô Tình Karaoke Tone Nam Cha Cha Cha Nhạc Sống ｜ Trọng Hiếu.mp4                                           | Trọng Hiếu
+(50 rows)
+
+            section            |      metric      | count | percentage 
+-------------------------------+------------------+-------+------------
+ === EXTRACTION STATISTICS === | Total files      | 11727 | 100%
+                               | Artist extracted |  3573 | 30.5%
+                               | NULL (no artist) |  8154 | 69.5%
+(3 rows)
+
+         section         |      artist       | song_count 
+-------------------------+-------------------+------------
+ === ENGLISH ARTISTS === | Mochiii           |         41
+ === ENGLISH ARTISTS === | Beat Hay          |         40
+ === ENGLISH ARTISTS === | Sabrina Carpenter |         39
+ === ENGLISH ARTISTS === | Phan Duy Anh      |         37
+ === ENGLISH ARTISTS === | Taylor Swift      |         29
+ === ENGLISH ARTISTS === | Adele             |         19
+ === ENGLISH ARTISTS === | Elvis Presley     |         18
+ === ENGLISH ARTISTS === | Ed Sheeran        |         18
+ === ENGLISH ARTISTS === | Justin Bieber     |         16
+ === ENGLISH ARTISTS === | Karaoke           |         16
+ === ENGLISH ARTISTS === | Slow Ballad       |         15
+ === ENGLISH ARTISTS === | Olivia Dean       |         14
+ === ENGLISH ARTISTS === | Morgan Wallen     |         14
+ === ENGLISH ARTISTS === | Miley Cyrus       |         14
+ === ENGLISH ARTISTS === | Benson Boone      |         12
+ === ENGLISH ARTISTS === | Lewis Capaldi     |         12
+ === ENGLISH ARTISTS === | Chappell Roan     |         11
+ === ENGLISH ARTISTS === | Bossa Nova        |         11
+ === ENGLISH ARTISTS === | Ariana Grande     |         11
+ === ENGLISH ARTISTS === | Truong Vu         |         10
+(20 rows)
+
+          section           |      artist      | song_count 
+----------------------------+------------------+------------
+ === VIETNAMESE ARTISTS === | Trọng Hiếu       |        495
+ === VIETNAMESE ARTISTS === | Ngô Thụy Miên    |         90
+ === VIETNAMESE ARTISTS === | Phạm Duy         |         58
+ === VIETNAMESE ARTISTS === | Đinh Tùng Huy    |         46
+ === VIETNAMESE ARTISTS === | Đức Huy          |         34
+ === VIETNAMESE ARTISTS === | Nguyễn Kiều Oanh |         31
+ === VIETNAMESE ARTISTS === | Quốc Thiên       |         27
+ === VIETNAMESE ARTISTS === | Trịnh Công Sơn   |         27
+ === VIETNAMESE ARTISTS === | Trường Sa        |         26
+ === VIETNAMESE ARTISTS === | Ca Sĩ Giấu Mặt   |         24
+ === VIETNAMESE ARTISTS === | Từ Công Phụng    |         24
+ === VIETNAMESE ARTISTS === | Như Việt         |         22
+ === VIETNAMESE ARTISTS === | Châu Khải Phong  |         20
+ === VIETNAMESE ARTISTS === | Phối Chuẩn 2025  |         19
+ === VIETNAMESE ARTISTS === | Khắc Việt        |         18
+ === VIETNAMESE ARTISTS === | Y Vân            |         17
+ === VIETNAMESE ARTISTS === | Minh Vương M4U   |         17
+ === VIETNAMESE ARTISTS === | Khánh Băng       |         15
+ === VIETNAMESE ARTISTS === | Phạm Đình Chương |         15
+ === VIETNAMESE ARTISTS === | Văn Phụng        |         15
+(20 rows)
+

@@ -21,6 +21,8 @@ export async function GET(
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
     
+    console.log('[users/history] Fetching history for user:', userId, 'room:', roomId || 'all', 'since:', twelveMonthsAgo.toISOString());
+    
     let query = supabaseAdmin
       .from('kara_song_history')
       .select(`
@@ -38,8 +40,11 @@ export async function GET(
     const { data: history, error } = await query;
     
     if (error) {
+      console.error('[users/history] Database error:', error);
       throw error;
     }
+    
+    console.log('[users/history] Found', history?.length || 0, 'history entries');
     
     // Map kara_songs to song for backward compatibility
     const mapped = (history || []).map(item => ({

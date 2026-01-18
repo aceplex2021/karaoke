@@ -9,6 +9,22 @@ import QRCode from '@/components/QRCode';
 import type { Room, QueueItem } from '@/shared/types';
 
 /**
+ * Format seconds to MM:SS or HH:MM:SS
+ */
+function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
  * TV Mode - Passive playback client (Checkpoint B)
  * Backend is the only playback authority.
  * TV only:
@@ -38,6 +54,9 @@ function TVModePageContent() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [volume, setVolume] = useState(1);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false); // Mobile sidebar toggle
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   
   // Prevent stale refresh overwrites
   const requestIdRef = useRef<number>(0);
@@ -47,6 +66,7 @@ function TVModePageContent() {
   const currentSongRef = useRef<QueueItem | null>(null);
   const roomRef = useRef<Room | null>(null);
   const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
+  const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -195,6 +215,78 @@ function TVModePageContent() {
   };
 
   /**
+   * Handle video timeupdate event - stable callback for both addEventListener and onTimeUpdate prop
+   * This ensures progress bar updates continuously (like fullscreen)
+   */
+  const handleTimeUpdate = useCallback(() => {
+    const currentVideo = videoRef.current;
+    if (currentVideo && isFinite(currentVideo.currentTime) && currentVideo.currentTime >= 0) {
+      // Always update - this is what fullscreen uses
+      setCurrentTime(currentVideo.currentTime);
+    }
+  }, []);
+
+  /**
+   * Handle video ended event - stable callback for both addEventListener and onEnded prop
+   */
+  const handleEnded = useCallback(async () => {
+    console.log('[tv] onEnded fired');
+    
+    // Prevent double-firing (both addEventListener and onEnded prop might fire)
+    if (isAdvancingRef.current) {
+      console.log('[tv] onEnded already processing, ignoring duplicate event');
+      return;
+    }
+    
+    // Use refs to get latest values (not closure values)
+    const latestRoom = roomRef.current;
+    const latestCurrentSong = currentSongRef.current;
+    const playingQueueItemId = playingQueueItemIdRef.current;
+    
+    if (!latestRoom) {
+      console.warn('[tv] onEnded fired but no room');
+      return;
+    }
+    
+    // CRITICAL: Verify that the ended video matches the DB's current song
+    // This prevents marking wrong songs as completed when video element is out of sync
+    if (latestCurrentSong && playingQueueItemId !== latestCurrentSong.id) {
+      console.warn('[tv] onEnded fired but video element is playing different song:', {
+        playingQueueItemId,
+        currentSongId: latestCurrentSong.id,
+        message: 'Ignoring onEnded - video element out of sync with DB'
+      });
+      return;
+    }
+    
+    // Mark as processing to prevent double-firing
+    isAdvancingRef.current = true;
+    
+    console.log('[tv] onEnded verified - calling /advance for room:', latestRoom.id, 'queue item:', playingQueueItemId);
+    try {
+      // Call /advance endpoint (atomic state transition)
+      await api.advancePlayback(latestRoom.id);
+      console.log('[tv] /advance succeeded');
+      // Clear playing queue item ID and video src to force reload of next song
+      playingQueueItemIdRef.current = null;
+      currentVideoSrcRef.current = null;
+      // Trigger immediate refresh to get new currentSong (don't wait for poll)
+      // This ensures autoplay works immediately
+      if (latestRoom.id) {
+        await refreshState(latestRoom.id);
+      }
+    } catch (err: any) {
+      console.error('[tv] Failed to advance playback:', err);
+      setError('Failed to advance to next song');
+    } finally {
+      // Reset flag after a short delay to allow for state updates
+      setTimeout(() => {
+        isAdvancingRef.current = false;
+      }, 500);
+    }
+  }, [refreshState]);
+
+  /**
    * Video element handling
    * Reloads video when media_url changes (key={media_url} forces remount)
    * Must reload on currentSong.song.media_url change: key={media_url} + effect sets src, load(), play()
@@ -216,7 +308,8 @@ function TVModePageContent() {
 
     // Only reload if the URL OR queue item ID actually changed
     // This ensures we reload when a different queue item (even with same media_url) becomes current
-    if (currentVideoSrcRef.current === mediaUrl && playingQueueItemIdRef.current === queueItemId) {
+    // Also reload if playingQueueItemIdRef is null (after advance, before new song starts)
+    if (currentVideoSrcRef.current === mediaUrl && playingQueueItemIdRef.current === queueItemId && playingQueueItemIdRef.current !== null) {
       console.log('[tv] Video URL and queue item ID unchanged, skipping reload:', mediaUrl, queueItemId);
       return;
     }
@@ -225,38 +318,53 @@ function TVModePageContent() {
     console.log('[tv] set video src:', mediaUrl, 'for queue item:', queueItemId);
     currentVideoSrcRef.current = mediaUrl;
     playingQueueItemIdRef.current = queueItemId;
+    // Reset time tracking when new video loads
+    setCurrentTime(0);
+    setDuration(0);
     video.src = mediaUrl;
     video.load();
+    // Note: play() is called in handleLoadedData when video is ready
 
     const handleLoadedData = () => {
+      const currentVideo = videoRef.current;
+      if (!currentVideo) return;
+      
       console.log('[tv] Video loaded, attempting to play for queue item:', queueItemId);
       // After media_url change: set video.src, load(), attempt play()
-      video.play().then(() => {
-        console.log('[tv] Play() succeeded for queue item:', queueItemId);
-        // Mark this queue item as the one actually playing
-        playingQueueItemIdRef.current = queueItemId;
-      }).catch((err: any) => {
-        console.error('[tv] Failed to play video:', err);
-        if (err.name === 'NotAllowedError') {
-          // Autoplay blocked - show overlay requiring one click then retry play()
-          console.log('[tv] Autoplay blocked - showing user interaction overlay');
-          setNeedsUserInteraction(true);
-          setHasUserInteracted(false);
-        } else {
-          setError(`Failed to play video: ${err.message}`);
-          // On playback error, skip to next song
-          if (room) {
-            api.advancePlayback(room.id).catch(console.error);
+      // Use setTimeout to ensure video is fully ready (fixes autoplay timing issue)
+      setTimeout(() => {
+        currentVideo.play().then(() => {
+          console.log('[tv] Play() succeeded for queue item:', queueItemId);
+          // Mark this queue item as the one actually playing
+          playingQueueItemIdRef.current = queueItemId;
+        }).catch((err: any) => {
+          console.error('[tv] Failed to play video:', err);
+          if (err.name === 'NotAllowedError') {
+            // Autoplay blocked - show overlay requiring one click then retry play()
+            console.log('[tv] Autoplay blocked - showing user interaction overlay');
+            setNeedsUserInteraction(true);
+            setHasUserInteracted(false);
+          } else {
+            setError(`Failed to play video: ${err.message}`);
+            // On playback error, skip to next song
+            if (room) {
+              api.advancePlayback(room.id).catch(console.error);
+            }
           }
-        }
-      });
+        });
+      }, 100); // Small delay to ensure video element is ready
     };
 
     const handlePlay = () => {
+      const currentVideo = videoRef.current;
+      if (!currentVideo) return;
+      
       console.log('Video started playing');
       setIsPlaying(true);
       setNeedsUserInteraction(false);
       setError('');
+      // Update current time immediately when play starts
+      setCurrentTime(currentVideo.currentTime);
       // Hide controls after starting to play
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = setTimeout(() => {
@@ -265,52 +373,19 @@ function TVModePageContent() {
     };
 
     const handlePause = () => {
+      const currentVideo = videoRef.current;
+      if (!currentVideo) return;
+      
       console.log('Video paused');
       setIsPlaying(false);
+      // Update current time when paused
+      setCurrentTime(currentVideo.currentTime);
     };
 
-    const handleEnded = async () => {
-      console.log('[tv] onEnded fired');
-      // Use refs to get latest values (not closure values)
-      const latestRoom = roomRef.current;
-      const latestCurrentSong = currentSongRef.current;
-      const playingQueueItemId = playingQueueItemIdRef.current;
-      
-      if (!latestRoom) {
-        console.warn('[tv] onEnded fired but no room');
-        return;
-      }
-      
-      // CRITICAL: Verify that the ended video matches the DB's current song
-      // This prevents marking wrong songs as completed when video element is out of sync
-      if (latestCurrentSong && playingQueueItemId !== latestCurrentSong.id) {
-        console.warn('[tv] onEnded fired but video element is playing different song:', {
-          playingQueueItemId,
-          currentSongId: latestCurrentSong.id,
-          message: 'Ignoring onEnded - video element out of sync with DB'
-        });
-        return;
-      }
-      
-      console.log('[tv] onEnded verified - calling /advance for room:', latestRoom.id, 'queue item:', playingQueueItemId);
-      try {
-        // Call /advance endpoint (atomic state transition)
-        await api.advancePlayback(latestRoom.id);
-        console.log('[tv] /advance succeeded');
-        // Clear playing queue item ID since we've advanced
-        playingQueueItemIdRef.current = null;
-        // UI does NOTHING - waits for next poll (≤3s) to see new state
-        // Rule: No immediate refresh, polling will pick up changes
-      } catch (err: any) {
-        console.error('[tv] Failed to advance playback:', err);
-        setError('Failed to advance to next song');
-      }
-    };
-    
-    // Store handleEnded in a way that can be called from both addEventListener and onEnded prop
-    const handleEndedWrapper = () => {
-      handleEnded();
-    };
+    // Use the stable handleEnded callback from useCallback
+    // Also attach via onEnded prop for reliability (React manages this internally)
+    // This ensures the event fires even if the element is remounted
+    video.onended = handleEnded;
 
     const handleError = async (e: any) => {
       console.error('[tv] Video error:', e);
@@ -329,10 +404,19 @@ function TVModePageContent() {
       }
     };
 
+    const handleLoadedMetadata = () => {
+      const currentVideo = videoRef.current;
+      if (currentVideo) {
+        setDuration(currentVideo.duration);
+      }
+    };
+
     video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
-    video.addEventListener('ended', handleEndedWrapper);
+    video.addEventListener('ended', handleEnded);
     video.addEventListener('error', handleError);
     
     console.log('[tv] Video event listeners attached, currentSong:', currentSong?.id);
@@ -355,15 +439,20 @@ function TVModePageContent() {
 
     return () => {
       video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      // Note: onTimeUpdate prop is handled by React, no need to remove
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
-      video.removeEventListener('ended', handleEndedWrapper);
+      video.removeEventListener('ended', handleEnded);
       video.removeEventListener('error', handleError);
+      // Clear onEnded prop handler
+      video.onended = null;
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
     };
-  }, [currentSong?.id, currentSong?.song?.media_url, room, volume]);
+  }, [currentSong?.id, currentSong?.song?.media_url, room, volume, handleEnded, handleTimeUpdate]);
 
   // Mouse movement to show controls
   useEffect(() => {
@@ -410,11 +499,14 @@ function TVModePageContent() {
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
         {/* Video Player - key={media_url} forces remount on URL change */}
         <video
-          key={currentSong?.song?.media_url || 'no-video'}
+          key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
           ref={videoRef}
           autoPlay
           playsInline
-          // onEnded is handled by addEventListener in useEffect (with verification)
+          // onEnded is handled by both addEventListener AND onEnded prop for reliability
+          onEnded={handleEnded}
+          // onTimeUpdate as prop for reliability (like fullscreen)
+          onTimeUpdate={handleTimeUpdate}
           style={{
             width: '100%',
             height: '100%',
@@ -467,39 +559,77 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Controls Overlay */}
+      {/* Song Title and User Name - Top Left */}
       {showControls && currentSong && !needsUserInteraction && (
         <div
           style={{
             position: 'absolute',
-            bottom: 0,
+            top: '1rem',
+            left: '1rem',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)',
+            padding: '0.75rem 1rem',
+            borderRadius: '8px',
+            zIndex: 1000,
+            maxWidth: 'calc(100% - 2rem)',
+          }}
+        >
+          {currentSong && (
+            <div style={{ color: 'white' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', lineHeight: '1.3', marginBottom: '0.25rem' }}>
+                {currentSong.song?.title || 'Unknown Song'}
+              </div>
+              {currentSong.user && (
+                <div style={{ fontSize: '0.9rem', opacity: 0.85 }}>
+                  {currentSong.user.display_name || 'Guest'}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Controls Overlay - YouTube style */}
+      {showControls && currentSong && !needsUserInteraction && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '10px',
             left: 0,
             right: 0,
             background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)',
-            padding: '1rem 1.5rem',
+            padding: '0.75rem 1rem 0.75rem 1rem',
             zIndex: 1000,
+            paddingBottom: '1rem',
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Top Controls Row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
+          {/* Controls Row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
             {/* Play/Pause Button */}
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (videoRef.current) {
-                  if (isPlaying) {
-                    videoRef.current.pause();
-                  } else {
-                    videoRef.current.play().catch((err) => {
+                  const video = videoRef.current;
+                  // Check actual video state, not just isPlaying state
+                  if (video.paused) {
+                    // Video is paused, play it
+                    try {
+                      await video.play();
+                      setIsPlaying(true);
+                    } catch (err) {
                       console.error('Failed to play:', err);
-                    });
+                    }
+                  } else {
+                    // Video is playing, pause it
+                    video.pause();
+                    setIsPlaying(false);
                   }
                 }
               }}
               style={{
                 fontSize: '1.5rem',
-                width: '40px',
-                height: '40px',
+                width: '36px',
+                height: '36px',
                 background: 'transparent',
                 color: 'white',
                 border: 'none',
@@ -509,6 +639,7 @@ function TVModePageContent() {
                 justifyContent: 'center',
                 borderRadius: '50%',
                 transition: 'background 0.2s',
+                flexShrink: 0,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = 'rgba(255,255,255,0.2)';
@@ -517,22 +648,23 @@ function TVModePageContent() {
                 e.currentTarget.style.background = 'transparent';
               }}
             >
-              {isPlaying ? '⏸' : '▶'}
+              {videoRef.current && !videoRef.current.paused ? '⏸' : '▶'}
             </button>
 
-            {/* Play Next Button - Moved from song info area */}
+            {/* Play Next Button */}
             <button
               onClick={handleManualAdvance}
               disabled={!currentSong && queue.length === 0}
               style={{
-                fontSize: '1.2rem',
-                padding: '0.5rem 1rem',
+                fontSize: '1rem',
+                padding: '0.4rem 0.8rem',
                 background: (currentSong || queue.length > 0) ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.3)',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
                 cursor: (currentSong || queue.length > 0) ? 'pointer' : 'not-allowed',
                 transition: 'all 0.2s',
+                flexShrink: 0,
               }}
               onMouseEnter={(e) => {
                 if (currentSong || queue.length > 0) {
@@ -545,12 +677,12 @@ function TVModePageContent() {
                 }
               }}
             >
-              ⏭️ Play Next
+              ⏭️ Next
             </button>
 
             {/* Volume Control */}
             <div
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}
               onMouseEnter={() => setShowVolumeSlider(true)}
               onMouseLeave={() => setShowVolumeSlider(false)}
             >
@@ -563,12 +695,17 @@ function TVModePageContent() {
                   }
                 }}
                 style={{
-                  fontSize: '1.5rem',
+                  fontSize: '1.3rem',
                   background: 'transparent',
                   border: 'none',
                   color: 'white',
                   cursor: 'pointer',
                   padding: '0.25rem',
+                  width: '36px',
+                  height: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 {volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}
@@ -587,10 +724,25 @@ function TVModePageContent() {
                       setVolume(newVolume);
                     }
                   }}
-                  style={{ width: '100px' }}
+                  style={{ width: '80px' }}
                 />
               )}
             </div>
+
+            {/* Time Duration Display - YouTube style on right */}
+            {duration > 0 && (
+              <div style={{ 
+                color: 'white', 
+                fontSize: '0.9rem', 
+                opacity: 0.9, 
+                whiteSpace: 'nowrap',
+                fontFamily: 'monospace',
+                marginLeft: 'auto',
+                flexShrink: 0,
+              }}>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </div>
+            )}
 
             {/* Fullscreen Button */}
             <button
@@ -624,28 +776,121 @@ function TVModePageContent() {
                 border: 'none',
                 color: 'white',
                 cursor: 'pointer',
+                flexShrink: 0,
+                width: '36px',
+                height: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
               {isFullscreen ? '⤓' : '⤢'}
             </button>
           </div>
 
-          {/* Song Info */}
-          {currentSong && (
-            <div style={{ color: 'white' }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-                {currentSong.song?.title || 'Unknown Song'}
+          {/* Progress Bar - YouTube style below buttons */}
+          {duration > 0 && (
+            <div
+              style={{
+                width: '100%',
+                height: '4px',
+                cursor: 'pointer',
+                position: 'relative',
+                marginTop: '0.5rem',
+              }}
+              onClick={(e) => {
+                if (videoRef.current && duration > 0) {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const clickX = e.clientX - rect.left;
+                  const percentage = clickX / rect.width;
+                  const newTime = percentage * duration;
+                  videoRef.current.currentTime = newTime;
+                  setCurrentTime(newTime);
+                }
+              }}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  background: 'rgba(255,255,255,0.2)',
+                  borderRadius: '2px',
+                  position: 'relative',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
+                    height: '100%',
+                    background: '#ff0000',
+                    borderRadius: '2px',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '12px',
+                    height: '12px',
+                    background: '#ff0000',
+                    borderRadius: '50%',
+                    opacity: showControls ? 1 : 0,
+                    transition: 'opacity 0.2s',
+                    boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+                  }}
+                />
               </div>
-              {currentSong.user && (
-                <div style={{ fontSize: '0.9rem', opacity: 0.8 }}>
-                  {currentSong.user.display_name || 'Guest'}
-                </div>
-              )}
             </div>
           )}
         </div>
       )}
       </div>
+
+      {/* Mobile Toggle Button - Only visible on mobile/tablet */}
+      <button
+        onClick={() => setShowSidebar(!showSidebar)}
+        className="sidebar-toggle-btn"
+        style={{
+          position: 'absolute',
+          top: '1rem',
+          right: '1rem',
+          zIndex: 600,
+          background: 'rgba(0,0,0,0.8)',
+          color: 'white',
+          border: '2px solid rgba(255,255,255,0.3)',
+          borderRadius: '8px',
+          padding: '0.75rem',
+          fontSize: '1.5rem',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: '48px',
+          minHeight: '48px',
+        }}
+        title={showSidebar ? 'Hide Queue' : 'Show Queue & QR'}
+      >
+        {showSidebar ? '✕' : '☰'}
+      </button>
+
+      {/* Backdrop Overlay - Only visible on mobile when sidebar is open */}
+      {showSidebar && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setShowSidebar(false)}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 499,
+          }}
+        />
+      )}
 
       {/* Queue Sidebar - Enhanced scrolling for TV browsers */}
       <div
@@ -670,7 +915,7 @@ function TVModePageContent() {
           // Webkit scrollbar styling (Chrome, Safari, Smart TV browsers)
           // Note: These are pseudo-elements, so we'll add them via CSS class
         }}
-        className="tv-queue-scroll"
+        className={`tv-queue-scroll queue-sidebar ${showSidebar ? 'sidebar-open' : 'sidebar-closed'}`}
       >
         {/* QR Code - Positioned at top of queue sidebar, outside video area */}
         {room && (

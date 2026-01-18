@@ -1,0 +1,266 @@
+           section            |                                                  storage_path                                                  | path_length 
+------------------------------+----------------------------------------------------------------------------------------------------------------+-------------
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Hai Mái Nhà Tranh Tone Nữ Nhạc Sống ｜Trọng Hiếu__nu.mp4                                       |          71
+ === SAMPLE STORAGE PATHS === | /Videos/Sầu Tím Thiệp Hồng Karaoke Tone Nam Nhạc Sống 2023 ｜ Trọng Hiếu.mp4                                   |          75
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Liên Khúc Nhạc Sống Dễ Hát Song Ca ｜ Tuyển Chọn Nhạc Trữ Tình 2025 - Cô Hàng Xóm__song_ca.mp4 |         109
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke ｜ Bỏ Lỡ Một Người Bỏ Lỡ Một Đời - Châu Khải Phong ft Lê Chí Trung ｜ Beat Chuẩn.mp4           |          98
+ === SAMPLE STORAGE PATHS === | /Videos/Sabrina Carpenter - Go Go Juice (Without Backing Vocals) (Karaoke Version) with Lyrics On Screen.mp4   |         108
+ === SAMPLE STORAGE PATHS === | /Videos/JISOO, ZAYN - EYES CLOSED (Karaoke Version).mp4                                                        |          55
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke MÙA XUÂN ĐẦU TIÊN (Rumba Ballad) SONG CA (E⧸Mi Trưởng)KIM QUY Karaoke__song_ca__c2a5699c6.mp4  |         109
+ === SAMPLE STORAGE PATHS === | /Videos/MỘT NGÀY KHÔNG CÓ EM - KARAOKE - Tone NAM Tenor ( Bbm⧸Si giáng thứ )__nam.mp4                          |          85
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Rong Chơi Cuối Trời Quên Lãng - Tone Nam ｜ TAS BEAT__nam.mp4                                  |          76
+ === SAMPLE STORAGE PATHS === | /Videos/BIỂN NHỚ - KARAOKE - Tone NAM ( Gm⧸Sol Thứ )__nam__cbccea19c.mp4                                       |          72
+ === SAMPLE STORAGE PATHS === | /Videos/WHAM! Last Christmas - The Sing King Carollers Creator Collab 2025__c074f7b47.mp4                      |          89
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Nhạc Sống Liên Khúc SONG CA Tuyển Chọn Dễ Hát Nhất ｜ Biển Mặn - Chuyện Hoa Sim__song_ca.mp4   |         107
+ === SAMPLE STORAGE PATHS === | /Videos/Doja Cat - Jealous Type (Karaoke Version)__c35e7548e.mp4                                               |          64
+ === SAMPLE STORAGE PATHS === | /Videos/🟡 DUY LONG • VO TRÒN NỖI NHỚ EM (Minh Đức) [OFFICIAL MUSIC VIDEO].mp4                                 |          77
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Sao Chưa Thấy Hồi Âm Tone Nam Remix Nhạc Sống ｜ Trọng Hiếu__nam_remix.mp4                     |          89
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Nếu Đời Không Có Anh Tone Nam Nhạc Sống gia huy beat__nam.mp4                                  |          77
+ === SAMPLE STORAGE PATHS === | /Videos/Lizzy McAlpine - doomsday (Karaoke Version).mp4                                                        |          55
+ === SAMPLE STORAGE PATHS === | /Videos/CÂY ĐÀN BỎ QUÊN - KARAOKE - Tone NỮ Soprano ( Bbm⧸Si giáng thứ )__nu.mp4                               |          80
+ === SAMPLE STORAGE PATHS === | /Videos/MỘNG CHIỀU XUÂN - KARAOKE ( Rumba ) - Tone NỮ Trầm ( F⧸Fa trưởng )__nu.mp4                             |          82
+ === SAMPLE STORAGE PATHS === | /Videos/KARAOKE ｜ MÊ ANH - Khắc Việt x Nữ Ca Sĩ Giấu Mặt Cover ｜ Beat Tone Nữ Chuẩn__nu.mp4                  |          91
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Ca Dao Em Va Toi - Beat DVD ( Nam ).mp4                                                        |          55
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke MÙA XUÂN ĐẦU TIÊN - Rumba Ballad - Tone NAM (F#⧸Fa Thăng) KIM QUY Karaoke.mp4                  |          93
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke Anh Về Với Em Tone Nam ｜ Nam Trân__nam.mp4                                                    |          58
+ === SAMPLE STORAGE PATHS === | /Videos/Can you sing all of these Classic American chorus'？__ca3a18e09.mp4                                    |          74
+ === SAMPLE STORAGE PATHS === | /Videos/Khóc Thầm Karaoke Tone Nam ( Gm ) Rumba Nhạc Sống ｜ Trọng Hiếu__nam.mp4                               |          79
+ === SAMPLE STORAGE PATHS === | /Videos/GỌI NGƯỜI YÊU DẤU - KARAOKE - Tone NAM Trầm ( F⧸Fa Trưởng )__nam.mp4                                   |          76
+ === SAMPLE STORAGE PATHS === | /Videos/HOA SOAN BÊN THỀM CŨ - KARAOKE - Tone NAM ( Ab⧸La giáng ).mp4                                          |          69
+ === SAMPLE STORAGE PATHS === | /Videos/Karaoke BÀI THÁNH CA BUỒN - Slow Rock - Tone NAM Trầm (Ab⧸La giáng) - KIM QUY KARAOKE__nam.mp4         |         102
+ === SAMPLE STORAGE PATHS === | /Videos/Nhớ Về Em Karaoke Tone Nam Karaoke Đăng Khôi - Beat Mới__nam.mp4                                       |          72
+ === SAMPLE STORAGE PATHS === | /Videos/Còn Thương Sắc Hoa Chung Tình Karaoke Song Ca Nhạc Sống ｜ Trọng Hiếu__song_ca.mp4                     |          89
+(30 rows)
+
+            section             |                                                         storage_path                                                         
+--------------------------------+------------------------------------------------------------------------------------------------------------------------------
+ === PATHS WITH PARENTHESES === | /Videos/GIA TÀI CỦA MẸ - KARAOKE - HỢP CA ( G⧸Sol trưởng ).mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke EM CÒN NHỚ MÙA XUÂN (Ngô Thuỵ MIên) Slow Ballad Tone NAM (C⧸Đô Trưởng) KIM QUY KARAOKE__nam_ballad.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Bobby Helms - Jingle Bell Rock (Two Semitones Down) (Karaoke Version) with Lyrics On Screen__c64cc1174.mp4
+ === PATHS WITH PARENTHESES === | /Videos/LÒNG MẸ - KARAOKE - Tone NAM Trầm ( Gm⧸Sol Thứ ).mp4
+ === PATHS WITH PARENTHESES === | /Videos/Rihanna - Breakin' Dishes (Karaoke Version).mp4
+ === PATHS WITH PARENTHESES === | /Videos/MỘT NGÀY NHƯ MỌI NGÀY - KARAOKE - Tone NAM Trầm ( Fm⧸Fa Thứ ).mp4
+ === PATHS WITH PARENTHESES === | /Videos/KARAOKE XIN MẶT TRỜI NGỦ YÊN - Tone NỮ Trầm( Dm⧸Rê Thứ )__nu.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke - Rồi cũng già - Tone ： Nam ( Gm ) -st ： Vũ Thành An__nam.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke RIÊNG MỘT GÓC TRỜI (Ngô THụy Miên) Boston Ball - Tone NAM  (Am⧸La Thứ) KIM QUY Karaoke.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Taylor Swift - The Fate Of Ophelia (Backing Track Visualizer)__ce4a96bca.mp4
+ === PATHS WITH PARENTHESES === | /Videos/DƯ ÂM MÙA GIÁNG SINH KARAOKE - Tone NAM Tenor ( Bb⧸Si giáng )__nam.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke CHỈ LÀ GIẤC MƠ QUA (Yellow Bird) Rumba Ballad - Tone NAM Tenor (Eb⧸Mi giáng) KIM QUY Karaoke__nam_ballad.mp4
+ === PATHS WITH PARENTHESES === | /Videos/DIỄM XƯA - KARAOKE - Tone NỮ Soprano ( Bm⧸Si Thứ )__nu.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke BÀI THÁNH CA BUỒN - Slow Rock - Tone NAM (Bb⧸Si giáng) KIM QUY KARAOKE__nam.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Ariana Grande - The Girl in the Bubble (Karaoke Version)__c62b20331.mp4
+ === PATHS WITH PARENTHESES === | /Videos/KittenSneeze, Michael Kovach, Amanda Hufford, CLOUDSAVE - Abstraction (Big Band Version) (Karaoke).mp4
+ === PATHS WITH PARENTHESES === | /Videos/Karaoke KHÔNG CÒN MÙA THU ( Việt Anh) - Boston - Tone NAM ( B⧸Si Trưởng ) KIM QUY Karaoke.mp4
+ === PATHS WITH PARENTHESES === | /Videos/CHIỀU NAY KHÔNG CÓ EM - KARAOKE - Tone NAM Tenor ( Eb⧸Mi giáng )__nam.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Thành Phố Buồn Karaoke Tone Nam ( Fm ) Nhạc Sống Âm Thanh Đẳng Cấp ｜ Trọng Hiếu__nam.mp4
+ === PATHS WITH PARENTHESES === | /Videos/Sabrina Carpenter - Sugar Talking (Karaoke Version) with Lyrics On Screen.mp4
+(20 rows)
+
+               section               |                                                      storage_path                                                       
+-------------------------------------+-------------------------------------------------------------------------------------------------------------------------
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Tình Nhạt Phai Tone Nam ｜ Karaoke Beat ｜ 84__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke ｜ Yêu Em Thật Đấy - Đinh Tùng Huy ｜ Beat Chuẩn Tone Nữ__nu.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/KARAOKE ｜ Say Để Quên - Kiều Oanh ｜ Composer ： Lê Cương ｜ Beat Chuẩn.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/KARAOKE Lời Tình Buồn (Hoàng Thanh Tâm) - Slow Ballad -Tone NỮ Trầm ( Am⧸La Thứ) KIM QUY Karaoke__nu_ballad.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Cho Lần Cuối Tone Nữ ｜ Nam Trân__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Liên Khúc Tone Nam Nhạc Sống Dễ Hát ｜ Nhớ Nhau Hoài -Tâm Sự Với Em ｜ Trọng Hiếu__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke TẤM ẢNH NGÀY XƯA - Rumba - Tone NỮ Trầm (Ab⧸La giáng) KIM QUY KARAOKE__nu.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Hãy Hát Lên Remix Tone Nữ Nhạc Sống ｜ Trọng Hiếu__nu_remix.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Loi Ke Dang Trinh - Beat DVD ( Truong Vu ).mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Tàu Đêm Năm Cũ Tone Nữ Nhạc Sống Đàn EA7 ｜ Trọng Hiếu__nu.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke XIN HÃY RỜI XA (Vũ Tuấn Đức) - Rumba - Tone NAM Trầm ( Bbm⧸Si giáng thứ ) KIM QUY KARAOKE.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/karaoke Hỡi Người Tình_ Nhạc Ngoại Lời Việt Ngọc Lan_ Hòa âm Đoàn Đức Tú_ Giọng Nam__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/KARAOKE ｜ Cà Phê Đắng Tim Anh Đau - Ca Sĩ Giấu Mặt ｜ Beat Tone Nam Chuẩn__nam__cf05f144c.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Ru Nửa Vầng Trăng Song Ca Nhạc Sống ｜ Trọng Hiếu__song_ca.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/karaoke Xa Rồi Mùa Hạ Cuối Tone Nữ Nhạc Sống ｜ Trọng Hiếu__nu.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Đừng Xa Em Đêm Nay Tone Nam Nhạc Sống gia huy beat__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Thương Về Miền Trung Tone Nam ｜ Nam Trân__nam.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke ĐỪNG XA NHAU (Phạm Duy) - Boston - Tone NỮ Soprano ( Bb⧸Si giáng Trưởng ) - KIM QUY Karaoke__nu.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Song Ca 2025 ｜ Siêu Phẩm Song Ca Nhạc Vàng Bolero - Hồi Tưởng__song_ca.mp4
+ === PATHS STARTING WITH KARAOKE === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Song Ca ｜ Chọn Lọc Nhạc Vàng Bolero - Con Đường Xưa Em Đi__song_ca.mp4
+(20 rows)
+
+          section          |                                                       storage_path                                                       
+---------------------------+--------------------------------------------------------------------------------------------------------------------------
+ === PATHS WITH DASHES === | /Videos/Rod Wave - Sinners (Karaoke Version).mp4
+ === PATHS WITH DASHES === | /Videos/CHUYỆN TÌNH BUỒN (Phạm Duy) - KARAOKE - Tone NAM Trầm ( B⧸Si trưởng )__nam.mp4
+ === PATHS WITH DASHES === | /Videos/CUỐI CÙNG CHO MỘT TÌNH YÊU - KARAOKE - Tone NỮ ( A⧸La Trưởng )__nu.mp4
+ === PATHS WITH DASHES === | /Videos/ACV Karaoke ｜ Không Đáng Để Nghĩ - Khắc Việt ｜ Beat Tone Nữ__nu.mp4
+ === PATHS WITH DASHES === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Bolero Tone Nữ ｜ Người Giàu Cũng Khóc - Không Giờ Rồi__nu_bolero.mp4
+ === PATHS WITH DASHES === | /Videos/SÀIGÒN VĨNH BIỆT - KARAOKE - Tone NAM Trầm ( E⧸Mi Trưởng )__nam.mp4
+ === PATHS WITH DASHES === | /Videos/KARAOKE ｜ Hạt Mưa Vương Vấn - Phan Duy Anh ｜ Beat Rumba Tone Nam__nam.mp4
+ === PATHS WITH DASHES === | /Videos/Adele - Million Years Ago (Karaoke Version).mp4
+ === PATHS WITH DASHES === | /Videos/Karaoke Liên Khúc Nhạc Vàng Song Ca Dễ Hát ｜ Tuyển Chọn Nhạc Trữ Tình - Nếu Được Làm Người Tình__song_ca.mp4
+ === PATHS WITH DASHES === | /Videos/Karaoke Ở NƠI NÀO EM CÒN NHỚ (Ngô Thụy Miên) Rumba - Tone NỮ Trầm (Dm⧸Rê thứ) KIM QUY KARAOKE__nu__cc88a5301.mp4
+ === PATHS WITH DASHES === | /Videos/Glenn Frey - Part Of Me, Part Of You (Karaoke Version) with Lyrics On Screen.mp4
+ === PATHS WITH DASHES === | /Videos/KARAOKE THU QUYẾN RŨ ( Đoàn Chuẩn - Từ Linh ) - Tone NỮ Soprano ( Ab⧸La Giáng )__nu.mp4
+ === PATHS WITH DASHES === | /Videos/JoJo Siwa - Bulletproof (Karaoke Version).mp4
+ === PATHS WITH DASHES === | /Videos/Zui Zui 最最 - Yao Hui Wen 姚慧汶 Karaoke OST Sunshine Of My Life 若你安好便是晴天 [ C!卡拉OK! ].mp4
+ === PATHS WITH DASHES === | /Videos/Sergio Dalma - Bailar Pegados (Karaoke Version).mp4
+ === PATHS WITH DASHES === | /Videos/KARAOKE ｜ Chỉ Còn Những Niềm Đau - Kaylin Hà Thu ｜ Beat Chuẩn.mp4
+ === PATHS WITH DASHES === | /Videos/Megan Moroney - 6 Months Later (Karaoke Version).mp4
+ === PATHS WITH DASHES === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Tone Nam ｜ Chọn Lọc Nhạc Vàng Bolero Dễ Hát - Đêm TIền Đồn__nam_bolero.mp4
+ === PATHS WITH DASHES === | /Videos/BÀI KHÔNG TÊN SỐ 5 - KARAOKE - Tone NAM Trầm ( Cm⧸Đô Thứ ).mp4
+ === PATHS WITH DASHES === | /Videos/Caesars - Jerk It Out (Karaoke Version) with Lyrics On Screen__c2d6c994f.mp4
+(20 rows)
+
+                section                 |                                                      storage_path                                                      |                                              filename_no_ext                                               |                                potential_artist                                
+----------------------------------------+------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc Những Bài Nỗi Tiếng - Mưa Đêm Tỉnh Nhỏ__song_ca.mp4 | Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc Những Bài Nỗi Tiếng - Mưa Đêm Tỉnh Nhỏ__song_ca | Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc Những Bài Nỗi Tiếng
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/ÁO LỤA HÀ ĐÔNG - KARAOKE - Tone NAM ( Dm⧸Rê Thứ )__nam.mp4                                                     | ÁO LỤA HÀ ĐÔNG - KARAOKE - Tone NAM ( Dm⧸Rê Thứ )__nam                                                     | ÁO LỤA HÀ ĐÔNG
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Queen - I Want To Break Free (Karaoke Version).f136.mp4                                                        | Queen - I Want To Break Free (Karaoke Version).f136                                                        | Queen
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/TINH SẦU - KARAOKE - Tone NỮ ( D⧸Rê Trưởng )__nu.mp4                                                           | TINH SẦU - KARAOKE - Tone NỮ ( D⧸Rê Trưởng )__nu                                                           | TINH SẦU
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/NẰNG THỦY TINH - KARAOKE - Tone NỮ Trầm ( C⧸Đô Thứ )__nu.mp4                                                   | NẰNG THỦY TINH - KARAOKE - Tone NỮ Trầm ( C⧸Đô Thứ )__nu                                                   | NẰNG THỦY TINH
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke Liên Khúc Nhạc Xưa Song Ca ｜ Tuyển Chọn Lk Nhạc Lính Dễ Hát - Chuyến Đi Về Sáng__song_ca.mp4          | Karaoke Liên Khúc Nhạc Xưa Song Ca ｜ Tuyển Chọn Lk Nhạc Lính Dễ Hát - Chuyến Đi Về Sáng__song_ca          | Karaoke Liên Khúc Nhạc Xưa Song Ca ｜ Tuyển Chọn Lk Nhạc Lính Dễ Hát
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/BÀI KHÔNG TÊN SỐ 4 - KARAOKE - Tone NAM Trầm ( Dm⧸Rê Thứ )__nam.mp4                                            | BÀI KHÔNG TÊN SỐ 4 - KARAOKE - Tone NAM Trầm ( Dm⧸Rê Thứ )__nam                                            | BÀI KHÔNG TÊN SỐ 4
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke NHƯ ĐÃ DẤU YÊU (Đức Huy) Ballad - Tone NAM (Gm⧸Sol Thứ) KIM QUY KARAOKE__nam_ballad__cb833f2fa.mp4     | Karaoke NHƯ ĐÃ DẤU YÊU (Đức Huy) Ballad - Tone NAM (Gm⧸Sol Thứ) KIM QUY KARAOKE__nam_ballad__cb833f2fa     | Karaoke NHƯ ĐÃ DẤU YÊU (Đức Huy) Ballad
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/KARAOKE LIÊN KHÚC ĐÀN ORGAN MELODY SIÊU HAY ｜ CHỌN LỌC BOLERO DỄ HÁT - NHỊP CẦU TRI ÂM__bolero.mp4            | KARAOKE LIÊN KHÚC ĐÀN ORGAN MELODY SIÊU HAY ｜ CHỌN LỌC BOLERO DỄ HÁT - NHỊP CẦU TRI ÂM__bolero            | KARAOKE LIÊN KHÚC ĐÀN ORGAN MELODY SIÊU HAY ｜ CHỌN LỌC BOLERO DỄ HÁT
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke Chọn Lọc Liên Khúc Tone Nữ ｜ Tuyển Chọn Lk Nhạc Trữ Tình 2025 - Tình Ngăn Đôi Bờ__nu.mp4              | Karaoke Chọn Lọc Liên Khúc Tone Nữ ｜ Tuyển Chọn Lk Nhạc Trữ Tình 2025 - Tình Ngăn Đôi Bờ__nu              | Karaoke Chọn Lọc Liên Khúc Tone Nữ ｜ Tuyển Chọn Lk Nhạc Trữ Tình 2025
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/TÌNH KHUÙC THỨ NHẤT KARAOKE - Tone NAM ( Bbm⧸Si giáng thứ ).mp4                                                | TÌNH KHUÙC THỨ NHẤT KARAOKE - Tone NAM ( Bbm⧸Si giáng thứ )                                                | TÌNH KHUÙC THỨ NHẤT KARAOKE
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/KARAOKE ｜ Chẳng Màng Bận Tâm - Phan Duy Anh ｜ Mochiii Cover ｜ Beat Rumba Tone Nữ__nu.mp4                    | KARAOKE ｜ Chẳng Màng Bận Tâm - Phan Duy Anh ｜ Mochiii Cover ｜ Beat Rumba Tone Nữ__nu                    | KARAOKE ｜ Chẳng Màng Bận Tâm
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Sabrina Carpenter - Goodbye (Karaoke Version).mp4                                                              | Sabrina Carpenter - Goodbye (Karaoke Version)                                                              | Sabrina Carpenter
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke MẤY ĐỘ THU VỀ (Minh Kỳ) Rumba Ballad - Tone NAM Trầm (C⧸Đô Trưởng) KIM QUY KARAOKE__nam_ballad.mp4     | Karaoke MẤY ĐỘ THU VỀ (Minh Kỳ) Rumba Ballad - Tone NAM Trầm (C⧸Đô Trưởng) KIM QUY KARAOKE__nam_ballad     | Karaoke MẤY ĐỘ THU VỀ (Minh Kỳ) Rumba Ballad
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/DIỄM XƯA - KARAOKE - Tone NỮ Trầm ( Am⧸La Thứ )__nu.mp4                                                        | DIỄM XƯA - KARAOKE - Tone NỮ Trầm ( Am⧸La Thứ )__nu                                                        | DIỄM XƯA
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc LK Bolero - Người Tình Không Đến__song_ca.mp4       | Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc LK Bolero - Người Tình Không Đến__song_ca       | Karaoke Liên Khúc Nhạc Trữ Tình Song Ca Dễ Hát ｜ Chọn Lọc LK Bolero
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/PHỐ BUỒN - KARAOKE ( TANGO ) - Tone NAM ( Ebm⧸Mi giáng Thứ )__nam.mp4                                          | PHỐ BUỒN - KARAOKE ( TANGO ) - Tone NAM ( Ebm⧸Mi giáng Thứ )__nam                                          | PHỐ BUỒN
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Karaoke Liên Khúc Nhạc Vàng Tone Nữ ｜ Tuyển Chọn Những Bài Bolero Hay - Mưa Đêm Tỉnh Nhỏ__nu_bolero.mp4       | Karaoke Liên Khúc Nhạc Vàng Tone Nữ ｜ Tuyển Chọn Những Bài Bolero Hay - Mưa Đêm Tỉnh Nhỏ__nu_bolero       | Karaoke Liên Khúc Nhạc Vàng Tone Nữ ｜ Tuyển Chọn Những Bài Bolero Hay
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/Tate McRae - Just Keep Watching (Karaoke Version) with Lyrics On Screen__c4cadf96e.mp4                         | Tate McRae - Just Keep Watching (Karaoke Version) with Lyrics On Screen__c4cadf96e                         | Tate McRae
+ === POTENTIAL ARTIST - SONG FORMAT === | /Videos/TÌNH CA NGƯỜI ĐI BIỂN - KARAOKE - Tone NỮ Trầm ( A⧸La Trưởng )__nu.mp4                                         | TÌNH CA NGƯỜI ĐI BIỂN - KARAOKE - Tone NỮ Trầm ( A⧸La Trưởng )__nu                                         | TÌNH CA NGƯỜI ĐI BIỂN
+(20 rows)
+
+           section            |                                                           storage_path                                                           |                                                         filename                                                         | potential_artist  
+------------------------------+----------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------+-------------------
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Nhớ Người Yêu Tone Nữ Nhạc Sống Đàn Ea7 ｜ Trọng Hiếu__nu.mp4                                                    | Karaoke Nhớ Người Yêu Tone Nữ Nhạc Sống Đàn Ea7 ｜ Trọng Hiếu__nu.mp4                                                    | Karaoke Nh
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Nhung Dom Mat Hoa Chau - Beat DVD ( Truong Vu ).mp4                                                              | Karaoke Nhung Dom Mat Hoa Chau - Beat DVD ( Truong Vu ).mp4                                                              | Karaoke Nhung Dom
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Nửa Bài Tone Nam ｜ Nhạc Sống Đêm Mưa Nhớ Mẹ - Đắp Mộ Cuộc Tình__nam.mp4                 | Karaoke Liên Khúc Nhạc Trữ Tình Nửa Bài Tone Nam ｜ Nhạc Sống Đêm Mưa Nhớ Mẹ - Đắp Mộ Cuộc Tình__nam.mp4                 | Karaoke Li
+ === ENGLISH ARTIST NAMES === | /Videos/Zhao Xi 朝夕【Day and Night】– JC-T 檀健次 (Tan Jian Ci)《OST 很想很想你 Love Me, Love My Voice》Karaoke [C!卡拉OK!].mp4 | Zhao Xi 朝夕【Day and Night】– JC-T 檀健次 (Tan Jian Ci)《OST 很想很想你 Love Me, Love My Voice》Karaoke [C!卡拉OK!].mp4 | Zhao Xi
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Chuyện Tình Không Dĩ Vãng Tone Nam Nhạc Sống gia huy beat__nam.mp4                                               | Karaoke Chuyện Tình Không Dĩ Vãng Tone Nam Nhạc Sống gia huy beat__nam.mp4                                               | Karaoke Chuy
+ === ENGLISH ARTIST NAMES === | /Videos/Zara Larsson - Blue Moon (Karaoke Version)__cdf1c83cc.mp4                                                                | Zara Larsson - Blue Moon (Karaoke Version)__cdf1c83cc.mp4                                                                | Zara Larsson
+ === ENGLISH ARTIST NAMES === | /Videos/Jessica Baio - he loves me, he loves me not (Karaoke Version).mp4                                                        | Jessica Baio - he loves me, he loves me not (Karaoke Version).mp4                                                        | Jessica Baio
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liều Thuốc Cho Trái Tim Tone Nữ ｜ Nam Trân__nam.mp4                                                             | Karaoke Liều Thuốc Cho Trái Tim Tone Nữ ｜ Nam Trân__nam.mp4                                                             | Karaoke Li
+ === ENGLISH ARTIST NAMES === | /Videos/Cody Johnson - The Fall (Karaoke Version)__c2633cb93.mp4                                                                 | Cody Johnson - The Fall (Karaoke Version)__c2633cb93.mp4                                                                 | Cody Johnson
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liên Khúc Nhạc Dân Ca Tone Nữ Dễ Hát ｜ Siêu Phẩm Nhạc Vàng Tuyển Chọn - Sông Quê__nu.mp4                        | Karaoke Liên Khúc Nhạc Dân Ca Tone Nữ Dễ Hát ｜ Siêu Phẩm Nhạc Vàng Tuyển Chọn - Sông Quê__nu.mp4                        | Karaoke Li
+ === ENGLISH ARTIST NAMES === | /Videos/Reyna Roberts - Raised Right (Karaoke Version).mp4                                                                       | Reyna Roberts - Raised Right (Karaoke Version).mp4                                                                       | Reyna Roberts
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Nhạc Sống Đặc Biệt Nhất 2019 ｜ Lk Cha Cha Cha Dân Ca Đàn Organ Live Cực Đỉnh__live.mp4                          | Karaoke Nhạc Sống Đặc Biệt Nhất 2019 ｜ Lk Cha Cha Cha Dân Ca Đàn Organ Live Cực Đỉnh__live.mp4                          | Karaoke Nh
+ === ENGLISH ARTIST NAMES === | /Videos/Sao Trời Làm Gió Karaoke Tone Nam ( F#m ) Nhạc Chế - Cơm đã ăn xong rồi rửa chén đi anh.mp4                              | Sao Trời Làm Gió Karaoke Tone Nam ( F#m ) Nhạc Chế - Cơm đã ăn xong rồi rửa chén đi anh.mp4                              | Sao Tr
+ === ENGLISH ARTIST NAMES === | /Videos/Scotty McCreery, Hootie & The Blowfish - Bottle Rockets (Karaoke Version).mp4                                            | Scotty McCreery, Hootie & The Blowfish - Bottle Rockets (Karaoke Version).mp4                                            | Scotty Mc
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liên Khúc Nhạc Trữ Tình Bolero Tone Nam ｜ Lần Đầu Nói Dối - Hào Hoa__nam_bolero.mp4                             | Karaoke Liên Khúc Nhạc Trữ Tình Bolero Tone Nam ｜ Lần Đầu Nói Dối - Hào Hoa__nam_bolero.mp4                             | Karaoke Li
+ === ENGLISH ARTIST NAMES === | /Videos/Hai Lối Mộng Karaoke Song Ca Nhạc Sống Dễ Hát ｜ Trọng Hiếu__song_ca.mp4                                                 | Hai Lối Mộng Karaoke Song Ca Nhạc Sống Dễ Hát ｜ Trọng Hiếu__song_ca.mp4                                                 | Hai
+ === ENGLISH ARTIST NAMES === | /Videos/Tate McRae - Just Keep Watching (From F1® The Movie) (Karaoke Version).mp4                                               | Tate McRae - Just Keep Watching (From F1® The Movie) (Karaoke Version).mp4                                               | Tate Mc
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liên Khúc Nhạc Sống Tone Nữ ｜ Chọn Lọc Siêu Phẩm Nhạc Vàng - Tâm Sự Với Em__nu.mp4                              | Karaoke Liên Khúc Nhạc Sống Tone Nữ ｜ Chọn Lọc Siêu Phẩm Nhạc Vàng - Tâm Sự Với Em__nu.mp4                              | Karaoke Li
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Trở Về Cát Bụi Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                                         | Karaoke Trở Về Cát Bụi Tone Nam Nhạc Sống ｜ Trọng Hiếu__nam.mp4                                                         | Karaoke Tr
+ === ENGLISH ARTIST NAMES === | /Videos/Karaoke Liên Khúc Nhạc Vàng Bolero Trữ Tình 2020 ｜ Nhạc Sống Lk Xin Trả Tôi về - Nghèo Mà Có Tình__bolero.mp4           | Karaoke Liên Khúc Nhạc Vàng Bolero Trữ Tình 2020 ｜ Nhạc Sống Lk Xin Trả Tôi về - Nghèo Mà Có Tình__bolero.mp4           | Karaoke Li
+(20 rows)
+
+             section             |        pattern        | count 
+---------------------------------+-----------------------+-------
+ === PATH PATTERN STATISTICS === | Total files           | 11727
+                                 | Has parentheses ( )   |  5796
+                                 | Has dash " - "        |  6274
+                                 | Starts with "Karaoke" |  4743
+                                 | Has brackets [ ]      |   130
+                                 | English name at start |   566
+(6 rows)
+
+            section             | parentheses_content | frequency 
+--------------------------------+---------------------+-----------
+ === CONTENT IN PARENTHESES === | Karaoke Version     |      1314
+ === CONTENT IN PARENTHESES === |  Am                 |       188
+ === CONTENT IN PARENTHESES === |  Dm                 |       134
+ === CONTENT IN PARENTHESES === |  Em                 |       124
+ === CONTENT IN PARENTHESES === |  Gm⧸Sol Thứ         |       102
+ === CONTENT IN PARENTHESES === |  Dm⧸Rê Thứ          |       102
+ === CONTENT IN PARENTHESES === |  Bm                 |       100
+ === CONTENT IN PARENTHESES === |  Am⧸La Thứ          |        98
+ === CONTENT IN PARENTHESES === |  D⧸Rê Trưởng        |        96
+ === CONTENT IN PARENTHESES === |  Cm                 |        90
+ === CONTENT IN PARENTHESES === |  A⧸La Trưởng        |        87
+ === CONTENT IN PARENTHESES === |  Em⧸Mi Thứ          |        71
+ === CONTENT IN PARENTHESES === |  G⧸Sol Trưởng       |        70
+ === CONTENT IN PARENTHESES === |  Cm⧸Đô Thứ          |        69
+ === CONTENT IN PARENTHESES === |  F⧸Fa Trưởng        |        67
+ === CONTENT IN PARENTHESES === |  Gm                 |        65
+ === CONTENT IN PARENTHESES === |  C⧸Đô Trưởng        |        58
+ === CONTENT IN PARENTHESES === |  Ebm⧸Mi giáng thứ   |        57
+ === CONTENT IN PARENTHESES === |  Bm⧸Si Thứ          |        57
+ === CONTENT IN PARENTHESES === |  Fm                 |        55
+ === CONTENT IN PARENTHESES === |  Abm⧸La giáng thứ   |        53
+ === CONTENT IN PARENTHESES === |  Eb⧸Mi giáng        |        53
+ === CONTENT IN PARENTHESES === |  F#m                |        52
+ === CONTENT IN PARENTHESES === |  A#m                |        50
+ === CONTENT IN PARENTHESES === |  Fm⧸Fa Thứ          |        49
+ === CONTENT IN PARENTHESES === |  E⧸Mi Trưởng        |        48
+ === CONTENT IN PARENTHESES === | Ngô Thụy Miên       |        45
+ === CONTENT IN PARENTHESES === |  Bbm⧸Si giáng thứ   |        45
+ === CONTENT IN PARENTHESES === |  Ngô Thụy Miên      |        44
+ === CONTENT IN PARENTHESES === |  C⧸Đô trưởng        |        42
+(30 rows)
+
+           section           |       bracket_content        | frequency 
+-----------------------------+------------------------------+-----------
+ === CONTENT IN BRACKETS === |  C!卡拉OK!                   |        38
+ === CONTENT IN BRACKETS === | C!卡拉OK!                    |        27
+ === CONTENT IN BRACKETS === |  Vợ Tuyệt Vời Nhất 3         |         6
+ === CONTENT IN BRACKETS === | BALLAD VERSION               |         4
+ === CONTENT IN BRACKETS === |  KARAOKE                     |         4
+ === CONTENT IN BRACKETS === | KARAOKE                      |         3
+ === CONTENT IN BRACKETS === | Karaoke                      |         3
+ === CONTENT IN BRACKETS === | Link In Bio                  |         2
+ === CONTENT IN BRACKETS === |  LOWER KEY                   |         2
+ === CONTENT IN BRACKETS === | Live Version                 |         2
+ === CONTENT IN BRACKETS === |  Full                        |         2
+ === CONTENT IN BRACKETS === | Guitar Solo                  |         1
+ === CONTENT IN BRACKETS === | HD                           |         1
+ === CONTENT IN BRACKETS === | hdTdFsr1jy0                  |         1
+ === CONTENT IN BRACKETS === | hiOP4-clMS8                  |         1
+ === CONTENT IN BRACKETS === | Hòa tấu guitar               |         1
+ === CONTENT IN BRACKETS === | Karaoke 4K                   |         1
+ === CONTENT IN BRACKETS === | KARAOKE BEAT CHUẨN           |         1
+ === CONTENT IN BRACKETS === | Karaoke Gốc                  |         1
+ === CONTENT IN BRACKETS === |  KARAOKE Tone Nam            |         1
+ === CONTENT IN BRACKETS === | Lower Key                    |         1
+ === CONTENT IN BRACKETS === | MV Lyrics                    |         1
+ === CONTENT IN BRACKETS === |  Ngày mai rồi mình cũng già  |         1
+ === CONTENT IN BRACKETS === | NzqXCoD779U                  |         1
+ === CONTENT IN BRACKETS === | Official 4K MV               |         1
+ === CONTENT IN BRACKETS === | Official Audio               |         1
+ === CONTENT IN BRACKETS === | OFFICIAL MUSIC VIDEO         |         1
+ === CONTENT IN BRACKETS === | Piano Version                |         1
+ === CONTENT IN BRACKETS === | QKpUmSCD7e0                  |         1
+ === CONTENT IN BRACKETS === | rqz7V1tK2Nw                  |         1
+(30 rows)
+
+             section             | first_word | frequency 
+---------------------------------+------------+-----------
+ === FILENAME START PATTERNS === | Karaoke    |      3941
+ === FILENAME START PATTERNS === | KARAOKE    |       755
+ === FILENAME START PATTERNS === | Liên       |       159
+ === FILENAME START PATTERNS === | Tình       |        99
+ === FILENAME START PATTERNS === | TÌNH       |        93
+ === FILENAME START PATTERNS === | ACV        |        91
+ === FILENAME START PATTERNS === | BÀI        |        90
+ === FILENAME START PATTERNS === | Đêm        |        75
+ === FILENAME START PATTERNS === | MÙA        |        67
+ === FILENAME START PATTERNS === | Mưa        |        62
+ === FILENAME START PATTERNS === | The        |        61
+ === FILENAME START PATTERNS === | Mùa        |        56
+ === FILENAME START PATTERNS === | Con        |        55
+ === FILENAME START PATTERNS === | MỘT        |        53
+ === FILENAME START PATTERNS === | Chuyện     |        48
+ === FILENAME START PATTERNS === | karaoke    |        47
+ === FILENAME START PATTERNS === | Hai        |        45
+ === FILENAME START PATTERNS === | Bài        |        45
+ === FILENAME START PATTERNS === | Xin        |        44
+ === FILENAME START PATTERNS === | Ngày       |        44
+ === FILENAME START PATTERNS === | Hoa        |        43
+ === FILENAME START PATTERNS === | Em         |        43
+ === FILENAME START PATTERNS === | Chiều      |        42
+ === FILENAME START PATTERNS === | Sầu        |        41
+ === FILENAME START PATTERNS === | Nhớ        |        39
+ === FILENAME START PATTERNS === | Sabrina    |        39
+ === FILENAME START PATTERNS === | Người      |        38
+ === FILENAME START PATTERNS === | Đường      |        38
+ === FILENAME START PATTERNS === | Nếu        |        36
+ === FILENAME START PATTERNS === | THU        |        35
+(30 rows)
+

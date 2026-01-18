@@ -10,6 +10,10 @@ export const dynamic = 'force-dynamic';
  * Simple write endpoint - stores version_id only
  * Returns immediately - NO auto-start logic
  * 
+ * Accepts either:
+ * - version_id (direct version selection from Search tab)
+ * - song_id (from History/Favorites - will select default version)
+ * 
  * Rules enforced:
  * - Stores version_id (not song_id)
  * - No ensurePlaying()
@@ -19,14 +23,40 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { room_id, version_id, user_id } = body;
+    const { room_id, version_id, song_id, user_id } = body;
     
     // Validate required fields
-    if (!room_id || !version_id || !user_id) {
+    if (!room_id || (!version_id && !song_id) || !user_id) {
       return NextResponse.json(
-        { error: 'room_id, version_id, and user_id are required' },
+        { error: 'room_id, (version_id OR song_id), and user_id are required' },
         { status: 400 }
       );
+    }
+    
+    // If song_id is provided instead of version_id, fetch a default version
+    let finalVersionId = version_id;
+    if (!finalVersionId && song_id) {
+      console.log('[queue/add] song_id provided, fetching default version for song:', song_id);
+      
+      // Get the default version for this song (is_default=true, or first available)
+      const { data: versions, error: versionError } = await supabaseAdmin
+        .from('kara_song_versions')
+        .select('id')
+        .eq('song_id', song_id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true })
+        .limit(1);
+      
+      if (versionError || !versions || versions.length === 0) {
+        console.error('[queue/add] No versions found for song_id:', song_id, versionError);
+        return NextResponse.json(
+          { error: 'No versions found for this song' },
+          { status: 404 }
+        );
+      }
+      
+      finalVersionId = versions[0].id;
+      console.log('[queue/add] Using version:', finalVersionId, 'for song:', song_id);
     }
     
     // 1. Get room's queue_mode
@@ -72,10 +102,12 @@ export async function POST(request: NextRequest) {
     }
     
     // 3. Calculate round_number for round-robin mode
+    // Round-robin: Each user gets ONE song per round maximum
+    // Find the first round where this user doesn't have a song yet
     let roundNumber = 1;
     if (queueMode === 'round_robin') {
-      // Get current round from pending songs
-      const { data: pending } = await supabaseAdmin
+      // Get max round number
+      const { data: maxRoundData } = await supabaseAdmin
         .from('kara_queue')
         .select('round_number')
         .eq('room_id', room_id)
@@ -84,20 +116,32 @@ export async function POST(request: NextRequest) {
         .limit(1)
         .maybeSingle();
       
-      const currentRound = pending?.round_number || 1;
+      const maxRound = maxRoundData?.round_number || 0;
       
-      // Check if user already has a song in current round
-      const { data: userInRound } = await supabaseAdmin
-        .from('kara_queue')
-        .select('id')
-        .eq('room_id', room_id)
-        .eq('user_id', user_id)
-        .eq('status', 'pending')
-        .eq('round_number', currentRound)
-        .limit(1)
-        .maybeSingle();
+      // Find the first round (1 to maxRound+1) where this user doesn't have a song
+      let foundRound = false;
+      for (let round = 1; round <= maxRound + 1; round++) {
+        const { data: userInRound } = await supabaseAdmin
+          .from('kara_queue')
+          .select('id')
+          .eq('room_id', room_id)
+          .eq('user_id', user_id)
+          .eq('status', 'pending')
+          .eq('round_number', round)
+          .limit(1)
+          .maybeSingle();
+        
+        if (!userInRound) {
+          roundNumber = round;
+          foundRound = true;
+          break;
+        }
+      }
       
-      roundNumber = userInRound ? currentRound + 1 : currentRound;
+      // Fallback (shouldn't happen)
+      if (!foundRound) {
+        roundNumber = maxRound + 1;
+      }
     }
     
     // 4. Insert into queue (stores version_id ONLY, not song_id)
@@ -105,7 +149,7 @@ export async function POST(request: NextRequest) {
       .from('kara_queue')
       .insert({
         room_id,
-        version_id,  // ← Single source of truth
+        version_id: finalVersionId,  // ← Single source of truth
         user_id,
         position,
         round_number: roundNumber,

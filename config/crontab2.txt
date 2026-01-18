@@ -1,0 +1,4 @@
+root@truenas[~]# sudo crontab -l
+0 3 * * 3 /mnt/HomeServer/Media/Music/Karaoke/Automation/config/healthcheck_run.sh >> /mnt/HomeServer/Media/Music/Karaoke/Automation/logs/healthcheck_run.log 2>&1
+0 0 15 * * /mnt/HomeServer/Media/Music/Karaoke/Automation/config/orphan_report_run.sh >> /mnt/HomeServer/Media/Music/Karaoke/Automation/logs/orphan_report_run.log 2>&1
+0 1 * * 5 /mnt/HomeServer/Media/Music/Karaoke/Automation/config/metube_push.sh >> /mnt/HomeServer/Media/Music/Karaoke/Automation/logs/metube_push.log 2>&1

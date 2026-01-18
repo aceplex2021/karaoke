@@ -1,0 +1,48 @@
+steps to identify failed URLs
+
+1. Count total URLs from playlist
+root@truenas[~]# docker exec -it ix-metube-metube-1 yt-dlp --flat-playlist -i \
+$(grep -v '^#' /mnt/HomeServer/Media/Music/Karaoke/Automation/config/sources.txt) \
+| wc -l
+
+1713
+
+2. Count successful downloads
+root@truenas[~]# wc -l /mnt/HomeServer/Media/Music/Karaoke/Archive/metube-archive.txt
+
+579 /mnt/HomeServer/Media/Music/Karaoke/Archive/metube-archive.txt
+
+3. Produce failed URLs list
+sed -n '1,20p' /mnt/HomeServer/Media/Music/Karaoke/Archive/metube-archive.txt
+youtube O6ku-_AgDfE
+youtube gT1ZZd9-Qks
+youtube kJ936-Sphvg
+youtube x1l3j5dSROA
+youtube cTNtsXURpoU
+youtube XOVc-IfEjT8
+youtube J6sRtwXIO4c
+youtube s0RLX67QCqg
+youtube GoLcA_IXFnw
+youtube M0EwZlrPW88
+youtube Gwsk-pbGH3Y
+youtube Up5WFKa9rBU
+youtube xG-4kBNY9vA
+youtube PCO6ptk3MGM
+youtube -r1BZE395AY
+youtube vLOraMzCQd4
+youtube 9chQyEyRWJM
+youtube xzuEu0cNplA
+youtube 51ONOV4LAZo
+youtube VvVRRemHzMs
+
+4. Count current total failed URLs
+root@truenas[~]# docker exec ix-metube-metube-1 sh -c '
+yt-dlp --flat-playlist -i --print "%(id)s" $(grep -v "^#" /cookies/sources.txt) \
+| sort -u > /tmp/all_ids.txt && \
+sed "s/^youtube //" /archive/metube-archive.txt | sort -u > /tmp/ok_ids.txt && \
+comm -23 /tmp/all_ids.txt /tmp/ok_ids.txt | wc -l
+'
+
+1169
+
+5. 

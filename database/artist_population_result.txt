@@ -1,0 +1,68 @@
+BEGIN
+UPDATE 7397
+          section          |      metric      | count 
+---------------------------+------------------+-------
+ === UPDATE STATISTICS === | Total songs      |  8357
+                           | Artist populated |  1848
+                           | NULL (no artist) |  6509
+(3 rows)
+
+           section            |                                          title                                           |              artist_name              |                  id                  
+------------------------------+------------------------------------------------------------------------------------------+---------------------------------------+--------------------------------------
+ === SAMPLE UPDATED SONGS === | Bad Bunny Eoo                                                                            | Bad Bunny                             | 19907587-cbb3-444e-9fa6-45782da309d0
+ === SAMPLE UPDATED SONGS === | Hay Yeu Nhau Di Valse                                                                    | Trịnh Công Sơn                        | e94e8c01-6e49-48d3-aaa3-606bb56f3325
+ === SAMPLE UPDATED SONGS === | ｜ Quen Mot Nguoi Tung Yeu Chau Khai Phong ｜ Mochiii ｜ Rumba                           | Châu Khải Phong                       | f394d8e8-7c4d-4652-ac03-9a20a462ae44
+ === SAMPLE UPDATED SONGS === | ｜ Cu Ngo La Anh Dinh Tung Huy ｜ Ha                                                     | Đinh Tùng Huy                         | eedfc17c-5f48-4628-9d66-711ecc3cbc49
+ === SAMPLE UPDATED SONGS === | ｜ Nhuong Lai Noi Dau Ngan Ngan X Ca Si Giau Mat ｜ Chuan                                | Ngân Ngân x Ca Sĩ Giấu Mặt            | 573d5f7c-7508-43fd-ab63-1a3fa0305281
+ === SAMPLE UPDATED SONGS === | ｜ Khong Sao Em A Dinh Tung Huy ｜ Chuan                                                 | Đinh Tùng Huy                         | 6633889d-62b9-41e9-8546-ae70f366c606
+ === SAMPLE UPDATED SONGS === | Sabrina Carpenter Santa Doesn’T Know You Like I Do                                       | Sabrina Carpenter                     | fd1c6698-4a09-4994-8e4e-ffbe729c2c91
+ === SAMPLE UPDATED SONGS === | Marina Cuntissimo With On Screen                                                         | Marina                                | 174f7eea-59d7-41d5-8128-e1fd5cfd34cb
+ === SAMPLE UPDATED SONGS === | ｜ Mua Cua Troi May Mochiii X Thuy Le X Bao Van ｜ Composer Le Cuong X Nhu Viet ｜ Chuan | Mochiii x Thủy Lê x Bảo Vân           | 71955c1d-232c-4e33-addd-3105149d0885
+ === SAMPLE UPDATED SONGS === | Syml Where'S My Love                                                                     | SYML                                  | 961b86d4-d109-4db7-84a8-2ac55a552ec6
+ === SAMPLE UPDATED SONGS === | Ashanti Only U No Intro                                                                  | Ashanti                               | 71ad3726-dc2c-4703-8299-df1f77037e15
+ === SAMPLE UPDATED SONGS === | Los Del Rio Macarena                                                                     | Los Del Rio                           | ba9d9bfa-3749-4e25-bfd4-c3fc85b61239
+ === SAMPLE UPDATED SONGS === | ｜ Xuan Ve Tren Ma Nang Minh Vuong M4u X Dinh Dung X Nhu Viet ｜ Chuan                   | Minh Vương M4U x Đình Dũng x Như Việt | 39843f4c-573d-460c-a6f5-3136fdc2f32e
+ === SAMPLE UPDATED SONGS === | Earl Agustin Tibok                                                                       | Earl Agustin                          | dbe0b7b5-bad6-441d-83f9-66c33c9f6c83
+ === SAMPLE UPDATED SONGS === | ｜ Khong The Ben Lau Mochiii ｜                                                          | Mochiii                               | 10120115-39db-4171-a966-5237f073205f
+ === SAMPLE UPDATED SONGS === | Nhung Chieu Khong Co Em                                                                  | Tran Thai Hoa                         | 450c483e-5914-44dc-bc80-09c48996769e
+ === SAMPLE UPDATED SONGS === | Sang Ngang                                                                               | SANG NGANG                            | 46c6e9f2-5c70-4092-a91b-8c19215ac1cd
+ === SAMPLE UPDATED SONGS === | Lana Del Rey Bluebird                                                                    | Lana Del Rey                          | 27a50398-1f5e-4e2a-85e2-1ab83fa36fca
+ === SAMPLE UPDATED SONGS === | Christina Perri A Thousand Years                                                         | Christina Perri                       | 16ea82d4-0c90-4c80-b1e8-9c153c75b809
+ === SAMPLE UPDATED SONGS === | Tws – Plot Twist                                                                         | KARAOKE ⧸ Instrumental ⧸ Lyrics       | 9c3c90b4-a7ab-4e2d-ba5b-72dbad5f8846
+(20 rows)
+
+       section       |    artist_name    | song_count 
+---------------------+-------------------+------------
+ === TOP ARTISTS === | Đinh Tùng Huy     |         39
+ === TOP ARTISTS === | Phan Duy Anh      |         34
+ === TOP ARTISTS === | Sabrina Carpenter |         26
+ === TOP ARTISTS === | Mochiii           |         25
+ === TOP ARTISTS === | Ngô Thụy Miên     |         24
+ === TOP ARTISTS === | Như Việt          |         20
+ === TOP ARTISTS === | Adele             |         19
+ === TOP ARTISTS === | Châu Khải Phong   |         18
+ === TOP ARTISTS === | Phạm Duy          |         18
+ === TOP ARTISTS === | Quốc Thiên        |         17
+ === TOP ARTISTS === | Minh Vương M4U    |         16
+ === TOP ARTISTS === | Thương Võ         |         14
+ === TOP ARTISTS === | Taylor Swift      |         14
+ === TOP ARTISTS === | Ed Sheeran        |         13
+ === TOP ARTISTS === | Khắc Việt         |         13
+ === TOP ARTISTS === | Justin Bieber     |         13
+ === TOP ARTISTS === | Morgan Wallen     |         13
+ === TOP ARTISTS === | Nguyễn Kiều Oanh  |         12
+ === TOP ARTISTS === | Huyền Tranng      |         11
+ === TOP ARTISTS === | Elvis Presley     |         11
+ === TOP ARTISTS === | Ca Sĩ Giấu Mặt    |         11
+ === TOP ARTISTS === | Đức Huy           |         11
+ === TOP ARTISTS === | Miley Cyrus       |          9
+ === TOP ARTISTS === | Vũ Duy Khánh      |          9
+ === TOP ARTISTS === | Chappell Roan     |          9
+ === TOP ARTISTS === | Du Thiên          |          9
+ === TOP ARTISTS === | Ariana Grande     |          9
+ === TOP ARTISTS === | Thủy Lê           |          9
+ === TOP ARTISTS === | Tate McRae        |          8
+ === TOP ARTISTS === | SZA               |          8
+(30 rows)
+
+COMMIT

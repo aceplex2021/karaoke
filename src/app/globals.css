@@ -212,3 +212,31 @@ select {
   }
 }
 
+/* Queue Sidebar - Auto-hide for ALL screen sizes */
+
+/* Always show toggle button */
+.sidebar-toggle-btn {
+  display: flex !important;
+}
+
+/* Sidebar hidden by default, slides in when toggled */
+.queue-sidebar {
+  transform: translateX(100%);
+  transition: transform 0.3s ease-in-out;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.3);
+}
+
+.queue-sidebar.sidebar-open {
+  transform: translateX(0);
+}
+
+.queue-sidebar.sidebar-closed {
+  transform: translateX(100%);
+}
+
+/* Backdrop overlay */
+.sidebar-backdrop {
+  display: block;
+}
+
+

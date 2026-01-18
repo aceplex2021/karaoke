@@ -117,6 +117,12 @@ export const api = {
     return res.json();
   },
 
+  async getSongGroup(songId: string): Promise<{ group: SongGroupResult }> {
+    const res = await fetch(`${API_BASE}/songs/${songId}/group`);
+    if (!res.ok) throw new Error('Song group not found');
+    return res.json();
+  },
+
   async getHistory(roomId: string, userId: string): Promise<{ history: any[] }> {
     const res = await fetch(`${API_BASE}/songs/history/${roomId}/${userId}`);
     if (!res.ok) throw new Error('Failed to fetch history');
@@ -296,6 +302,31 @@ export const api = {
       : `${API_BASE}/users/${userId}/history`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch history');
+    return res.json();
+  },
+
+  // Favorites
+  async getUserFavorites(userId: string): Promise<{ favorites: Song[] }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/favorites`);
+    if (!res.ok) throw new Error('Failed to fetch favorites');
+    return res.json();
+  },
+
+  async addFavorite(userId: string, songId: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/favorites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ song_id: songId }),
+    });
+    if (!res.ok) throw new Error('Failed to add favorite');
+    return res.json();
+  },
+
+  async removeFavorite(userId: string, songId: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/users/${userId}/favorites?songId=${songId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error('Failed to remove favorite');
     return res.json();
   },
 };

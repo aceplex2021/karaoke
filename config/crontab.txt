@@ -1,0 +1,4 @@
+# m h dom mon dow command
+
+15 3 * * * /config/run.sh
+20 4 * * 0 /config/run.sh

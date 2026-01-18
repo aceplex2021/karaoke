@@ -375,6 +375,27 @@ function VersionSelectorModal({
                     </div>
                   </div>
 
+                  {/* Version Info: Format - Tone - Channel - Style - Artist */}
+                  {(version.performance_type || version.tone || version.channel || version.style || version.artist_name) && (
+                    <div style={{
+                      fontSize: '0.95rem',
+                      color: '#555',
+                      marginBottom: '1rem',
+                      paddingBottom: '1rem',
+                      borderBottom: '1px solid #eee',
+                      fontWeight: '500',
+                    }}>
+                      {[
+                        version.performance_type && version.performance_type !== 'solo' && 
+                          `Format: ${version.performance_type.charAt(0).toUpperCase() + version.performance_type.slice(1)}`,
+                        version.tone && `Tone: ${version.tone}`,
+                        version.channel && `Channel: ${version.channel}`,
+                        version.style && `Style: ${version.style}`,
+                        version.artist_name && `Artist: ${version.artist_name}`
+                      ].filter(Boolean).join(' - ')}
+                    </div>
+                  )}
+
                   {/* Metadata Tags */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
                     {version.pitch && (
@@ -530,13 +551,15 @@ export default function RoomPage() {
   const [removingFromQueue, setRemovingFromQueue] = useState(false);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'history'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'history' | 'favorites'>('search');
   const [showNameInput, setShowNameInput] = useState(false);
   const [showConfirmRemove, setShowConfirmRemove] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null);
-  const [recentSongs, setRecentSongs] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [favorites, setFavorites] = useState<Song[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoriteSongIds, setFavoriteSongIds] = useState<Set<string>>(new Set());
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -641,21 +664,53 @@ export default function RoomPage() {
     };
   }, [code]);
 
-  // Fetch recent songs when user is available
-  useEffect(() => {
+  // Fetch favorites
+  const fetchFavorites = useCallback(async () => {
     if (!user) return;
     
-    const fetchRecentSongs = async () => {
-      try {
-        const { history } = await api.getUserRecentSongs(user.id, 20);
-        setRecentSongs(history || []);
-      } catch (error) {
-        console.error('Failed to fetch recent songs:', error);
-      }
-    };
+    setFavoritesLoading(true);
+    try {
+      const { favorites: favoritesData } = await api.getUserFavorites(user.id);
+      setFavorites(favoritesData || []);
+      // Update favoriteSongIds set
+      const favoriteIds = new Set(favoritesData.map((song: Song) => song.id));
+      setFavoriteSongIds(favoriteIds);
+    } catch (error) {
+      console.error('Failed to fetch favorites:', error);
+      showError('Failed to load favorites');
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [user, showError]);
+
+  // Toggle favorite status for a song
+  const toggleFavorite = useCallback(async (songId: string) => {
+    if (!user) return;
     
-    fetchRecentSongs();
-  }, [user]);
+    try {
+      const isFavorite = favoriteSongIds.has(songId);
+      
+      if (isFavorite) {
+        // Remove from favorites
+        await api.removeFavorite(user.id, songId);
+        setFavoriteSongIds(prev => {
+          const next = new Set(prev);
+          next.delete(songId);
+          return next;
+        });
+        setFavorites(prev => prev.filter(song => song.id !== songId));
+        success('Removed from favorites');
+      } else {
+        // Add to favorites
+        await api.addFavorite(user.id, songId);
+        setFavoriteSongIds(prev => new Set(prev).add(songId));
+        success('Added to favorites');
+      }
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+      showError('Failed to update favorite');
+    }
+  }, [user, favoriteSongIds, success, showError]);
 
   // Fetch history when history tab is activated
   const fetchHistory = useCallback(async () => {
@@ -663,8 +718,15 @@ export default function RoomPage() {
     
     setHistoryLoading(true);
     try {
-      const { history: historyData } = await api.getUserHistory(user.id, room.id);
+      // Fetch both history and favorites
+      const [{ history: historyData }, { favorites: favoritesData }] = await Promise.all([
+        api.getUserHistory(user.id, room.id),
+        api.getUserFavorites(user.id),
+      ]);
       setHistory(historyData || []);
+      // Update favoriteSongIds for heart icon display
+      const favoriteIds = new Set(favoritesData.map((song: Song) => song.id));
+      setFavoriteSongIds(favoriteIds);
     } catch (error) {
       console.error('Failed to fetch history:', error);
       showError('Failed to load history');
@@ -931,6 +993,21 @@ export default function RoomPage() {
         >
           📜 History
         </button>
+        <button
+          onClick={() => {
+            setActiveTab('favorites');
+            fetchFavorites();
+          }}
+          style={{
+            flex: 1,
+            padding: '1rem',
+            background: activeTab === 'favorites' ? '#0070f3' : 'transparent',
+            color: activeTab === 'favorites' ? 'white' : '#333',
+            fontWeight: activeTab === 'favorites' ? 'bold' : 'normal',
+          }}
+        >
+          ❤️ Favorites
+        </button>
       </div>
 
       {/* Search Tab */}
@@ -956,59 +1033,6 @@ export default function RoomPage() {
           {error && (
             <div style={{ color: '#e00', marginBottom: '1rem', fontSize: '0.9rem' }}>
               {error}
-            </div>
-          )}
-
-          {/* Recent Songs Section */}
-          {recentSongs.length > 0 && (
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
-                🎵 Your Recent Songs (Last 20)
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {recentSongs.map((historyItem) => (
-                  <button
-                    key={historyItem.id}
-                    className="card"
-                    onClick={async () => {
-                      if (!room || !user) return;
-                      try {
-                        // Find the song group for this song
-                        const { results } = await api.searchSongs(historyItem.song?.title || '');
-                        const group = results.find(g => 
-                          g.display_title.toLowerCase() === historyItem.song?.title?.toLowerCase()
-                        );
-                        if (group) {
-                          handleAddToQueue(group);
-                        } else {
-                          showError('Song not found in catalog');
-                        }
-                      } catch (err: any) {
-                        showError(err.message || 'Failed to add song');
-                      }
-                    }}
-                    style={{ 
-                      textAlign: 'left', 
-                      padding: '0.75rem',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#f5f5f5';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = '#fff';
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                      {historyItem.song?.title || 'Unknown'}
-                    </div>
-                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                      {historyItem.song?.artist || 'Unknown'} • {new Date(historyItem.sung_at).toLocaleDateString()}
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 
@@ -1469,33 +1493,141 @@ export default function RoomPage() {
                       {item.times_sung > 1 && ` (${item.times_sung} times)`}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-sm"
-                    onClick={async () => {
-                      if (!room || !user) return;
-                      try {
-                        // Find the song group for this song
-                        const { results } = await api.searchSongs(item.song?.title || '');
-                        const group = results.find(g => 
-                          g.display_title.toLowerCase() === item.song?.title?.toLowerCase()
-                        );
-                        if (group) {
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <button
+                      onClick={() => item.song_id && toggleFavorite(item.song_id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        fontSize: '1.5rem',
+                        cursor: 'pointer',
+                        padding: '0.25rem',
+                        transition: 'transform 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                      title={favoriteSongIds.has(item.song_id) ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      {favoriteSongIds.has(item.song_id) ? '❤️' : '🤍'}
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      onClick={async () => {
+                        if (!room || !user || !item.song_id) return;
+                        console.log('[History] Add to Queue clicked for song_id:', item.song_id);
+                        
+                        try {
+                          // Get the song group (same as Search tab)
+                          const { group } = await api.getSongGroup(item.song_id);
+                          console.log('[History] Got song group:', group);
+                          // Use the same handleAddToQueue as Search tab
                           handleAddToQueue(group);
-                        } else {
-                          showError('Song not found in catalog');
+                        } catch (err: any) {
+                          console.error('[History] Failed to get song group:', err);
+                          showError(err.message || 'Failed to find song');
                         }
-                      } catch (err: any) {
-                        showError(err.message || 'Failed to add song');
-                      }
-                    }}
-                    style={{ 
-                      marginLeft: '1rem',
-                      padding: '0.5rem 1rem',
-                      fontSize: '0.9rem',
-                    }}
-                  >
-                    Add to Queue
-                  </button>
+                      }}
+                      style={{ 
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      Add to Queue
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Favorites Tab */}
+      {activeTab === 'favorites' && (
+        <div style={{ padding: '1rem' }}>
+          <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
+            ❤️ Your Favorite Songs
+          </h3>
+          
+          {favoritesLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              Loading favorites...
+            </div>
+          ) : favorites.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              No favorites yet. Add songs from your History tab!
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {favorites.map((song) => (
+                <div 
+                  key={song.id} 
+                  className="card" 
+                  style={{ 
+                    padding: '0.75rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                      {song.title}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                      {song.artist || 'Unknown Artist'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <button
+                      onClick={() => toggleFavorite(song.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        fontSize: '1.5rem',
+                        cursor: 'pointer',
+                        padding: '0.25rem',
+                        transition: 'transform 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                      title="Remove from favorites"
+                    >
+                      ❤️
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      onClick={async () => {
+                        if (!room || !user) return;
+                        console.log('[Favorites] Add to Queue clicked for song_id:', song.id);
+                        
+                        try {
+                          // Get the song group (same as Search tab)
+                          const { group } = await api.getSongGroup(song.id);
+                          console.log('[Favorites] Got song group:', group);
+                          // Use the same handleAddToQueue as Search tab
+                          handleAddToQueue(group);
+                        } catch (err: any) {
+                          console.error('[Favorites] Failed to get song group:', err);
+                          showError(err.message || 'Failed to find song');
+                        }
+                      }}
+                      style={{ 
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      Add to Queue
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
