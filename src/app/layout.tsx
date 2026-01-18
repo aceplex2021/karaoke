@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { PreviewProvider } from '@/contexts/PreviewContext';
 
 export const metadata: Metadata = {
   title: 'Karaoke Web App',
@@ -13,7 +14,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PreviewProvider>
+          {children}
+        </PreviewProvider>
+      </body>
     </html>
   );
 }

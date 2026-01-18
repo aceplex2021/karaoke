@@ -73,28 +73,6 @@ export interface SearchSongsResponse {
   results: SongGroupResult[];
 }
 
-// YouTube-like search types (flat version list)
-export interface VersionSearchResult {
-  version_id: string;
-  song_id: string;
-  song_title: string;
-  artist_name: string | null;
-  tone: string | null;          // 'nam', 'nu', etc.
-  mixer: string | null;          // 'Trọng Hiếu', 'Kim Quy', etc.
-  style: string | null;          // 'beat', 'acoustic', 'rumba', etc.
-  pitch: string | null;          // 'C', 'D#m', etc.
-  tempo: number | null;          // BPM
-  storage_path: string;
-  duration_seconds: number | null;
-  play_url: string;              // Full media URL
-}
-
-export interface VersionSearchResponse {
-  query: string;
-  results: VersionSearchResult[];
-  total: number;
-}
-
 export interface GroupVersion {
   version_id: string;
   label: string | null; // Raw label for backward compatibility

@@ -4,10 +4,8 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getOrCreateFingerprint } from '@/lib/utils';
-import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
+import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState } from '@/shared/types';
 import { useToast } from '@/components/Toast';
-import { VersionCard } from '@/components/VersionCard';
-import { usePreview } from '@/contexts/PreviewContext';
 
 // ====================================
 // VERSION DISPLAY HELPERS
@@ -543,7 +541,9 @@ export default function RoomPage() {
   const [queue, setQueue] = useState<QueueItem[]>([]); // Ledger order (all pending items)
   const [upNext, setUpNext] = useState<QueueItem | null>(null); // Turn order (next to play, read-only)
   const [currentSong, setCurrentSong] = useState<QueueItem | null>(null); // Currently playing
-  const [searchResults, setSearchResults] = useState<VersionSearchResult[]>([]); // UPDATED: Flat version list
+  const [searchResults, setSearchResults] = useState<SongGroupResult[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [showVersionSelector, setShowVersionSelector] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -566,9 +566,6 @@ export default function RoomPage() {
   
   // Toast notifications
   const { success, error: showError, ToastContainer } = useToast();
-  
-  // Preview management (single preview at a time)
-  const { activePreviewId, setActivePreview } = usePreview();
 
   /**
    * Refresh room state from backend (canonical source of truth)
@@ -759,25 +756,18 @@ export default function RoomPage() {
     setSearching(true);
     setError('');
     try {
-      console.log('[YouTube Search] Searching with query:', trimmedQuery);
-      
-      // NEW: Call search-versions API (flat version list)
-      const response = await fetch(`/api/songs/search-versions?q=${encodeURIComponent(trimmedQuery)}&limit=50`);
-      
-      if (!response.ok) {
-        throw new Error('Search failed');
-      }
-
-      const data: VersionSearchResponse = await response.json();
-      console.log('[YouTube Search] Found', data.results.length, 'versions');
-      
-      setSearchResults(data.results);
-      
-      if (data.results.length === 0) {
+      console.log('Searching with query:', trimmedQuery);
+      const { results } = await api.searchSongs({
+        q: trimmedQuery,
+        limit: 50,
+      });
+      console.log('Search results:', results.length);
+      setSearchResults(results);
+      if (results.length === 0) {
         setError('No songs found. Try a different search term.');
       }
     } catch (err: any) {
-      console.error('[YouTube Search] Search error:', err);
+      console.error('Search error:', err);
       setError(err.message || 'Failed to search songs');
       setSearchResults([]);
     } finally {
@@ -785,46 +775,6 @@ export default function RoomPage() {
     }
   };
 
-  /**
-   * YouTube-style search: Add version directly to queue (no modal)
-   * Used by VersionCard component
-   */
-  const handleAddVersionToQueue = async (versionId: string) => {
-    if (!room || !user) {
-      console.error('[handleAddVersionToQueue] Missing room or user');
-      setError('Room or user not found. Please refresh the page.');
-      return;
-    }
-
-    setAddingToQueue(true);
-    try {
-      console.log('[handleAddVersionToQueue] Adding version to queue:', { 
-        room_id: room.id, 
-        user_id: user.id, 
-        version_id: versionId
-      });
-
-      await api.addToQueue({
-        room_id: room.id,
-        version_id: versionId,
-        user_id: user.id,
-      });
-
-      setError('');
-      success('Song added to queue!');
-      // Stop any active preview
-      setActivePreview(null);
-    } catch (err: any) {
-      console.error('[handleAddVersionToQueue] Failed:', err);
-      const errorMessage = err.message || 'Failed to add song to queue';
-      setError(errorMessage);
-      showError(errorMessage);
-    } finally {
-      setAddingToQueue(false);
-    }
-  };
-
-  // OLD: Group-based search handler (kept for History/Favorites)
   const handleAddToQueue = async (group: SongGroupResult, versionId?: string) => {
     console.log('[handleAddToQueue] Called with:', { 
       group_id: group.group_id, 
@@ -852,6 +802,12 @@ export default function RoomPage() {
           group_id: group.group_id,
           available_versions: group.available.version_count
         });
+        // If multiple versions available, open selector; otherwise show error
+        if (group.available.version_count > 1) {
+          setSelectedGroupId(group.group_id);
+          setShowVersionSelector(true);
+          return;
+        }
         setError('No version available for this song. Please select a version.');
         return;
       }
@@ -877,6 +833,8 @@ export default function RoomPage() {
       success(`Added "${group.display_title}" to queue!`);
       // UI does NOTHING - waits for next poll (≤3s) to see change
       // Rule: No immediate refresh, no optimistic UI
+      setShowVersionSelector(false);
+      setSelectedGroupId(null);
     } catch (err: any) {
       console.error('[handleAddToQueue] Failed to add to queue:', err);
       const errorMessage = err.message || 'Failed to add song to queue';
@@ -1078,38 +1036,210 @@ export default function RoomPage() {
             </div>
           )}
 
-          {/* NEW: YouTube-like version grid */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: '16px',
-              padding: '16px 0',
-            }}
-          >
-            {searchResults.map((version) => (
-              <VersionCard
-                key={version.version_id}
-                version={version}
-                onAddToQueue={handleAddVersionToQueue}
-                isActive={activePreviewId === version.version_id}
-              />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {searchResults.map((group) => (
+              <div
+                key={group.group_id}
+                className="card"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  border: '1px solid #e0e0e0',
+                  background: '#fff',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '0.25rem' }}>
+                      {group.display_title}
+                    </div>
+                    {group.artists.length > 0 && (
+                      <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.5rem' }}>
+                        {group.artists.join(', ')}
+                      </div>
+                    )}
+                    {/* Enhanced Version Info Display */}
+                    {group.best_version && (
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem', 
+                        marginTop: '0.75rem',
+                        padding: '0.5rem',
+                        background: 'rgba(33, 150, 243, 0.1)',
+                        borderRadius: '6px',
+                      }}>
+                        <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>
+                          {getVersionIcon(group.best_version.label)}
+                        </span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', flex: 1 }}>
+                          <span style={{
+                            fontSize: '0.85rem',
+                            padding: '0.25rem 0.5rem',
+                            background: 'white',
+                            borderRadius: '4px',
+                            fontWeight: '600',
+                            color: '#333',
+                          }}>
+                            {formatMixerLabel(group.best_version.label)}
+                          </span>
+                          {group.best_version.pitch && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%)',
+                              color: '#1976D2',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              🎹 {group.best_version.pitch}
+                            </span>
+                          )}
+                          {group.best_version.tempo && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%)',
+                              color: '#F57C00',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              ⚡ {group.best_version.tempo} BPM
+                            </span>
+                          )}
+                          {group.best_version.is_default && (
+                            <span style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                              color: 'white',
+                              borderRadius: '4px',
+                              fontWeight: '600',
+                            }}>
+                              ⭐ Recommended
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {group.available.version_count > 1 && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <span
+                          onClick={() => {
+                            setSelectedGroupId(group.group_id);
+                            setShowVersionSelector(true);
+                          }}
+                          style={{
+                            fontSize: '0.85rem',
+                            padding: '0.5rem 0.75rem',
+                            background: '#fff3cd',
+                            color: '#856404',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            border: '1px solid #ffc107',
+                            display: 'inline-block',
+                            fontWeight: '500',
+                          }}
+                        >
+                          See {group.available.version_count} versions
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
+                    {group.available.version_count > 1 && (
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          setSelectedGroupId(group.group_id);
+                          setShowVersionSelector(true);
+                        }}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: '#f8f9fa',
+                          border: '1px solid #dee2e6',
+                          borderRadius: '4px',
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        Versions
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-primary"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[button] Add clicked for group:', {
+                          group_id: group.group_id,
+                          display_title: group.display_title,
+                          best_version: group.best_version,
+                          has_best_version: !!group.best_version,
+                          version_id: group.best_version?.version_id
+                        });
+                        try {
+                          if (!group.best_version || !group.best_version.version_id) {
+                            console.warn('[button] No best_version available, opening version selector');
+                            if (group.available.version_count > 1) {
+                              setSelectedGroupId(group.group_id);
+                              setShowVersionSelector(true);
+                            } else {
+                              setError('No version available for this song');
+                            }
+                            return;
+                          }
+                          handleAddToQueue(group);
+                        } catch (err) {
+                          console.error('[button] Error in onClick handler:', err);
+                          setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                        }
+                      }}
+                      disabled={addingToQueue}
+                      style={{ 
+                        padding: '0.5rem 1.5rem',
+                        opacity: addingToQueue ? 0.6 : 1,
+                        cursor: addingToQueue ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {addingToQueue ? 'Adding...' : 'Add'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             ))}
+
+            {searchResults.length === 0 && searchQuery && !searching && (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+                No songs found. Try a different search term.
+              </div>
+            )}
+
+            {searchResults.length === 0 && !searchQuery && !searching && (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+                Enter a search term to find songs (required)
+              </div>
+            )}
           </div>
 
-          {/* Empty states */}
-          {searchResults.length === 0 && searchQuery && !searching && (
-            <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>😕 No versions found</p>
-              <p style={{ fontSize: '0.9rem' }}>Try a different search term</p>
-            </div>
-          )}
-
-          {searchResults.length === 0 && !searchQuery && !searching && (
-            <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎤 Search for songs</p>
-              <p style={{ fontSize: '0.9rem' }}>Start typing to find karaoke tracks</p>
-            </div>
+          {/* Version Selector Modal */}
+          {showVersionSelector && selectedGroupId && (
+            <VersionSelectorModal
+              groupId={selectedGroupId}
+              group={searchResults.find(g => g.group_id === selectedGroupId)!}
+              onSelect={(versionId) => {
+                const group = searchResults.find(g => g.group_id === selectedGroupId);
+                if (group) {
+                  handleAddToQueue(group, versionId);
+                }
+              }}
+              onClose={() => {
+                setShowVersionSelector(false);
+                setSelectedGroupId(null);
+              }}
+            />
           )}
         </div>
       )}
