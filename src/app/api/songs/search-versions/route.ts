@@ -122,8 +122,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Map to VersionSearchResult
-    const results: VersionSearchResult[] = versions.map((file: any) => {
+    // Map to VersionSearchResult and deduplicate by version_id
+    // (multiple files can have same version_id, take first one)
+    const versionMap = new Map<string, VersionSearchResult>();
+    
+    for (const file of versions) {
       const version = file.kara_versions;
       const song = version.kara_songs;
       const groupMember = Array.isArray(song.kara_song_group_members) 
@@ -133,7 +136,12 @@ export async function GET(request: NextRequest) {
       
       const { tone, style } = parseLabel(version.label);
       
-      return {
+      // Skip if we already have this version
+      if (versionMap.has(file.version_id)) {
+        continue;
+      }
+      
+      versionMap.set(file.version_id, {
         version_id: file.version_id,
         song_id: version.song_id,
         song_title: group?.base_title_display || song.title_display || 'Untitled',
@@ -146,10 +154,11 @@ export async function GET(request: NextRequest) {
         storage_path: file.storage_path,
         duration_seconds: file.duration_seconds || null,
         play_url: buildPlayUrl(file.storage_path),
-      };
-    });
+      });
+    }
 
-    console.log(`[search-versions] Found ${results.length} versions`);
+    const results = Array.from(versionMap.values());
+    console.log(`[search-versions] Found ${results.length} unique versions (from ${versions.length} files)`);
 
     return NextResponse.json<VersionSearchResponse>({
       query: searchTerm,

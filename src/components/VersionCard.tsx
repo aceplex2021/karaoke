@@ -7,9 +7,11 @@ interface VersionCardProps {
   version: VersionSearchResult;
   onAddToQueue: (versionId: string) => void;
   isActive?: boolean; // For preview active state
+  onPreviewStart?: (versionId: string) => void; // Notify parent
+  onPreviewStop?: () => void; // Notify parent
 }
 
-export function VersionCard({ version, onAddToQueue, isActive = false }: VersionCardProps) {
+export function VersionCard({ version, onAddToQueue, isActive = false, onPreviewStart, onPreviewStop }: VersionCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -41,14 +43,27 @@ export function VersionCard({ version, onAddToQueue, isActive = false }: Version
       
       // Set video source
       video.src = version.play_url;
-      video.currentTime = 30; // Start at 30s
       video.muted = false; // User clicked, autoplay allowed
       video.volume = 0.5; // Reasonable volume
+      
+      // Wait for metadata to load before seeking
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = resolve;
+        video.onerror = reject;
+        video.load();
+      });
+      
+      // Seek to 30s (or start if video is shorter)
+      const seekTime = Math.min(30, (video.duration || 30) - 10);
+      video.currentTime = seekTime;
       
       // Attempt playback
       await video.play();
       setIsPlaying(true);
       setLoading(false);
+      
+      // Notify parent that this preview is active
+      onPreviewStart?.(version.version_id);
 
       // Auto-stop after 10 seconds
       timeoutRef.current = setTimeout(() => {
@@ -76,6 +91,9 @@ export function VersionCard({ version, onAddToQueue, isActive = false }: Version
     
     setIsPlaying(false);
     setLoading(false);
+    
+    // Notify parent that preview stopped
+    onPreviewStop?.();
   };
 
   const handleAddToQueue = () => {

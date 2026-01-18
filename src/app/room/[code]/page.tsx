@@ -771,9 +771,26 @@ export default function RoomPage() {
       const data: VersionSearchResponse = await response.json();
       console.log('[YouTube Search] Found', data.results.length, 'versions');
       
-      setSearchResults(data.results);
+      // Sort: Exact matches first, then alphabetically
+      const queryLower = trimmedQuery.toLowerCase();
+      const sortedResults = data.results.sort((a, b) => {
+        const titleA = a.song_title.toLowerCase();
+        const titleB = b.song_title.toLowerCase();
+        
+        // Check exact match (starts with query)
+        const aExact = titleA.startsWith(queryLower);
+        const bExact = titleB.startsWith(queryLower);
+        
+        if (aExact && !bExact) return -1; // a first
+        if (!aExact && bExact) return 1;  // b first
+        
+        // Both exact or both not exact - alphabetical
+        return titleA.localeCompare(titleB);
+      });
       
-      if (data.results.length === 0) {
+      setSearchResults(sortedResults);
+      
+      if (sortedResults.length === 0) {
         setError('No songs found. Try a different search term.');
       }
     } catch (err: any) {
@@ -1093,6 +1110,8 @@ export default function RoomPage() {
                 version={version}
                 onAddToQueue={handleAddVersionToQueue}
                 isActive={activePreviewId === version.version_id}
+                onPreviewStart={setActivePreview}
+                onPreviewStop={() => setActivePreview(null)}
               />
             ))}
           </div>
