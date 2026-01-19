@@ -33,30 +33,30 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // If song_id is provided instead of version_id, fetch a default version
-    let finalVersionId = version_id;
-    if (!finalVersionId && song_id) {
-      console.log('[queue/add] song_id provided, fetching default version for song:', song_id);
-      
-      // Get the default version for this song (is_default=true, or first available)
-      const { data: versions, error: versionError } = await supabaseAdmin
-        .from('kara_song_versions')
-        .select('id')
-        .eq('song_id', song_id)
-        .order('is_default', { ascending: false })
-        .order('created_at', { ascending: true })
-        .limit(1);
-      
-      if (versionError || !versions || versions.length === 0) {
-        console.error('[queue/add] No versions found for song_id:', song_id, versionError);
-        return NextResponse.json(
-          { error: 'No versions found for this song' },
-          { status: 404 }
-        );
-      }
-      
-      finalVersionId = versions[0].id;
-      console.log('[queue/add] Using version:', finalVersionId, 'for song:', song_id);
+    // If song_id is provided instead of version_id, treat it as version_id
+    // (In new schema, song_id === version_id, but we still support backward compat)
+    let finalVersionId = version_id || song_id;
+    
+    if (!finalVersionId) {
+      return NextResponse.json(
+        { error: 'version_id or song_id is required' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate version exists
+    const { data: versionCheck, error: versionError } = await supabaseAdmin
+      .from('kara_versions')
+      .select('id')
+      .eq('id', finalVersionId)
+      .single();
+    
+    if (versionError || !versionCheck) {
+      console.error('[queue/add] Version not found:', finalVersionId, versionError);
+      return NextResponse.json(
+        { error: 'Version not found' },
+        { status: 404 }
+      );
     }
     
     // 1. Get room's queue_mode

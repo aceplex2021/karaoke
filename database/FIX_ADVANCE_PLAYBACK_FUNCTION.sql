@@ -1,7 +1,5 @@
--- Function: advance_playback
--- Date: 2026-01-13
--- Purpose: Atomic state transition for TV playback (pending → playing → completed)
--- Called by: /api/rooms/[roomId]/advance
+-- Fix advance_playback function for new schema (version_id only, no song_id)
+-- Run this in Supabase SQL Editor
 
 CREATE OR REPLACE FUNCTION advance_playback(p_room_id UUID)
 RETURNS BOOLEAN AS $$
@@ -9,29 +7,19 @@ DECLARE
   v_current_id UUID;
   v_current_user_id UUID;
   v_current_version_id UUID;
-  v_current_song_id_from_queue UUID;
-  v_current_song_id UUID;
   v_next_id UUID;
   v_queue_mode VARCHAR(20);
   v_existing_history_id UUID;
 BEGIN
-  -- 1. Get current playing entry with user_id, version_id, and song_id (for backward compatibility)
-  SELECT id, user_id, version_id, song_id INTO v_current_id, v_current_user_id, v_current_version_id, v_current_song_id_from_queue
+  -- 1. Get current playing entry with user_id and version_id
+  SELECT id, user_id, version_id 
+  INTO v_current_id, v_current_user_id, v_current_version_id
   FROM kara_queue
   WHERE room_id = p_room_id AND status = 'playing'
   LIMIT 1;
   
   -- 2. Mark current as completed and write to history (if exists)
   IF v_current_id IS NOT NULL THEN
-    -- Get song_id: prefer from queue (backward compatibility), otherwise from version
-    IF v_current_song_id_from_queue IS NOT NULL THEN
-      v_current_song_id := v_current_song_id_from_queue;
-    ELSIF v_current_version_id IS NOT NULL THEN
-      SELECT song_id INTO v_current_song_id
-      FROM kara_versions
-      WHERE id = v_current_version_id;
-    END IF;
-    
     -- Mark as completed
     UPDATE kara_queue
     SET 
@@ -39,14 +27,14 @@ BEGIN
       completed_at = NOW()
     WHERE id = v_current_id;
     
-    -- Write to history if we have song_id
-    IF v_current_song_id IS NOT NULL AND v_current_user_id IS NOT NULL THEN
-      -- Check if history entry already exists for this user/song/room
+    -- Write to history if we have version_id and user_id
+    IF v_current_version_id IS NOT NULL AND v_current_user_id IS NOT NULL THEN
+      -- Check if history entry already exists for this user/version/room
       SELECT id INTO v_existing_history_id
       FROM kara_song_history
       WHERE room_id = p_room_id
         AND user_id = v_current_user_id
-        AND song_id = v_current_song_id
+        AND version_id = v_current_version_id
       LIMIT 1;
       
       IF v_existing_history_id IS NOT NULL THEN
@@ -58,8 +46,8 @@ BEGIN
         WHERE id = v_existing_history_id;
       ELSE
         -- Insert new history entry
-        INSERT INTO kara_song_history (room_id, user_id, song_id, sung_at, times_sung)
-        VALUES (p_room_id, v_current_user_id, v_current_song_id, NOW(), 1);
+        INSERT INTO kara_song_history (room_id, user_id, version_id, sung_at, times_sung)
+        VALUES (p_room_id, v_current_user_id, v_current_version_id, NOW(), 1);
       END IF;
     END IF;
   END IF;
@@ -118,5 +106,7 @@ $$ LANGUAGE plpgsql;
 -- Grant execute permission
 GRANT EXECUTE ON FUNCTION advance_playback(UUID) TO authenticated, anon, service_role;
 
--- Test the function:
--- SELECT advance_playback('your-room-id-here');
+-- Verify the function was created
+SELECT routine_name, routine_type 
+FROM information_schema.routines 
+WHERE routine_name = 'advance_playback' AND routine_schema = 'public';

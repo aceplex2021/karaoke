@@ -1378,13 +1378,17 @@ export default function RoomPage() {
                       {item.song?.title || 'Unknown'}
                     </div>
                     <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                      {item.song?.artist || 'Unknown'} • {new Date(item.sung_at).toLocaleDateString()} • 
-                      {item.times_sung > 1 && ` (${item.times_sung} times)`}
+                      {item.song?.artist || 'Unknown'}
+                      {item.song?.tone && ` • ${item.song.tone}`}
+                      {item.song?.mixer && ` • ${item.song.mixer}`}
+                      {item.song?.style && ` • ${item.song.style}`}
+                      {' • '}{new Date(item.sung_at).toLocaleDateString()}
+                      {item.times_sung > 1 && ` • ${item.times_sung} times`}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <button
-                      onClick={() => item.song_id && toggleFavorite(item.song_id)}
+                      onClick={() => item.version_id && toggleFavorite(item.version_id)}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -1399,26 +1403,18 @@ export default function RoomPage() {
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'scale(1)';
                       }}
-                      title={favoriteSongIds.has(item.song_id) ? 'Remove from favorites' : 'Add to favorites'}
+                      title={favoriteSongIds.has(item.version_id) ? 'Remove from favorites' : 'Add to favorites'}
                     >
-                      {favoriteSongIds.has(item.song_id) ? '❤️' : '🤍'}
+                      {favoriteSongIds.has(item.version_id) ? '❤️' : '🤍'}
                     </button>
                     <button
                       className="btn btn-sm"
                       onClick={async () => {
-                        if (!room || !user || !item.song_id) return;
-                        console.log('[History] Add to Queue clicked for song_id:', item.song_id);
+                        if (!room || !user || !item.version_id) return;
+                        console.log('[History] Add to Queue clicked for version_id:', item.version_id);
                         
-                        try {
-                          // Get the song group (same as Search tab)
-                          const { group } = await api.getSongGroup(item.song_id);
-                          console.log('[History] Got song group:', group);
-                          // Use the same handleAddToQueue as Search tab
-                          handleAddToQueue(group);
-                        } catch (err: any) {
-                          console.error('[History] Failed to get song group:', err);
-                          showError(err.message || 'Failed to find song');
-                        }
+                        // Directly add version to queue (we have version_id from history)
+                        await handleAddVersionToQueue(item.version_id);
                       }}
                       style={{ 
                         padding: '0.5rem 1rem',
@@ -1452,9 +1448,9 @@ export default function RoomPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {favorites.map((song) => (
+              {favorites.map((version: any) => (
                 <div 
-                  key={song.id} 
+                  key={version.id} 
                   className="card" 
                   style={{ 
                     padding: '0.75rem',
@@ -1465,15 +1461,18 @@ export default function RoomPage() {
                 >
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                      {song.title}
+                      {version.title_display || version.title || 'Unknown'}
                     </div>
                     <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                      {song.artist || 'Unknown Artist'}
+                      {version.artist_name || version.artist || 'Unknown Artist'} 
+                      {version.tone && ` • ${version.tone}`}
+                      {version.mixer && ` • ${version.mixer}`}
+                      {version.style && ` • ${version.style}`}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <button
-                      onClick={() => toggleFavorite(song.id)}
+                      onClick={() => toggleFavorite(version.id)}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -1496,18 +1495,9 @@ export default function RoomPage() {
                       className="btn btn-sm"
                       onClick={async () => {
                         if (!room || !user) return;
-                        console.log('[Favorites] Add to Queue clicked for song_id:', song.id);
-                        
-                        try {
-                          // Get the song group (same as Search tab)
-                          const { group } = await api.getSongGroup(song.id);
-                          console.log('[Favorites] Got song group:', group);
-                          // Use the same handleAddToQueue as Search tab
-                          handleAddToQueue(group);
-                        } catch (err: any) {
-                          console.error('[Favorites] Failed to get song group:', err);
-                          showError(err.message || 'Failed to find song');
-                        }
+                        console.log('[Favorites] Add to Queue clicked for version_id:', version.id);
+                        // Directly add version to queue (same as History tab)
+                        await handleAddVersionToQueue(version.id);
                       }}
                       style={{ 
                         padding: '0.5rem 1rem',

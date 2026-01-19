@@ -314,6 +314,10 @@ function TVModePageContent() {
       return;
     }
 
+    // Preserve current volume before reload (important for iOS)
+    const currentVolume = video.volume;
+    const wasMuted = video.muted;
+
     // Update tracked URL and queue item ID, then reload
     console.log('[tv] set video src:', mediaUrl, 'for queue item:', queueItemId);
     currentVideoSrcRef.current = mediaUrl;
@@ -322,6 +326,11 @@ function TVModePageContent() {
     setCurrentTime(0);
     setDuration(0);
     video.src = mediaUrl;
+    
+    // Restore volume BEFORE load() to prevent iOS from resetting it
+    video.volume = currentVolume;
+    video.muted = wasMuted;
+    
     video.load();
     // Note: play() is called in handleLoadedData when video is ready
 
@@ -329,7 +338,11 @@ function TVModePageContent() {
       const currentVideo = videoRef.current;
       if (!currentVideo) return;
       
-      console.log('[tv] Video loaded, attempting to play for queue item:', queueItemId);
+      // Restore volume again after load (iOS sometimes resets it)
+      currentVideo.volume = currentVolume;
+      currentVideo.muted = wasMuted;
+      
+      console.log('[tv] Video loaded, attempting to play for queue item:', queueItemId, 'volume:', currentVolume, 'muted:', wasMuted);
       // After media_url change: set video.src, load(), attempt play()
       // Use setTimeout to ensure video is fully ready (fixes autoplay timing issue)
       setTimeout(() => {
@@ -337,6 +350,9 @@ function TVModePageContent() {
           console.log('[tv] Play() succeeded for queue item:', queueItemId);
           // Mark this queue item as the one actually playing
           playingQueueItemIdRef.current = queueItemId;
+          // Final volume restore after playback starts (for iOS)
+          currentVideo.volume = currentVolume;
+          currentVideo.muted = wasMuted;
         }).catch((err: any) => {
           console.error('[tv] Failed to play video:', err);
           if (err.name === 'NotAllowedError') {
@@ -365,6 +381,9 @@ function TVModePageContent() {
       setError('');
       // Update current time immediately when play starts
       setCurrentTime(currentVideo.currentTime);
+      // Ensure volume is still correct after play starts (iOS safeguard)
+      currentVideo.volume = currentVolume;
+      currentVideo.muted = wasMuted;
       // Hide controls after starting to play
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = setTimeout(() => {
@@ -587,6 +606,66 @@ function TVModePageContent() {
           )}
         </div>
       )}
+
+      {/* Up Next Flying Banner - Scrolling marquee at top center (only shows in last 60 seconds) */}
+      {upNext && currentSong && !needsUserInteraction && duration > 0 && (duration - currentTime) <= 60 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '1rem',
+            left: 0,
+            right: 0,
+            overflow: 'hidden',
+            zIndex: 900,
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-block',
+              whiteSpace: 'nowrap',
+              animation: 'scrollLeft 15s linear infinite',
+              paddingLeft: '100%',
+            }}
+          >
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '1rem',
+                background: 'linear-gradient(135deg, rgba(0, 255, 0, 0.95) 0%, rgba(0, 200, 0, 0.95) 100%)',
+                color: '#000',
+                padding: '1rem 2rem',
+                borderRadius: '50px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                fontSize: '1.5rem',
+                fontWeight: 'bold',
+              }}
+            >
+              <span style={{ fontSize: '2rem' }}>🎵</span>
+              <span style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '900' }}>UP NEXT:</span>
+              <span>{upNext.song?.title || 'Unknown Song'}</span>
+              {upNext.user && (
+                <>
+                  <span style={{ fontSize: '1.8rem' }}>👤</span>
+                  <span>{upNext.user.display_name || 'Guest'}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes scrollLeft {
+          from {
+            transform: translateX(0);
+          }
+          to {
+            transform: translateX(-100%);
+          }
+        }
+      `}</style>
 
       {/* Controls Overlay - YouTube style */}
       {showControls && currentSong && !needsUserInteraction && (
@@ -1047,9 +1126,9 @@ function TVModePageContent() {
                   {/* Remove button */}
                   <button
                     onClick={async () => {
-                      if (room) {
+                      if (room && tvUserId) {
                         try {
-                          await api.removeFromQueue(item.id, room.id);
+                          await api.removeFromQueue(item.id, room.id, tvUserId);
                           await refreshState(room.id);
                         } catch (err: any) {
                           console.error('[tv] Failed to remove:', err);

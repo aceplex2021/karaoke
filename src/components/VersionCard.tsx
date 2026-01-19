@@ -35,30 +35,88 @@ export function VersionCard({ version, onAddToQueue, isActive = false, onPreview
   const startPreview = async () => {
     if (!videoRef.current || !version.play_url) return;
 
+    const video = videoRef.current;
+    
     try {
       setLoading(true);
       setError(false);
       
-      const video = videoRef.current;
+      // Detect iOS (iPhone/iPad)
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      
+      console.log('[VersionCard] Starting preview, isIOS:', isIOS);
       
       // Set video source
       video.src = version.play_url;
-      video.muted = false; // User clicked, autoplay allowed
-      video.volume = 0.5; // Reasonable volume
       
-      // Wait for metadata to load before seeking
-      await new Promise((resolve, reject) => {
-        video.onloadedmetadata = resolve;
-        video.onerror = reject;
-        video.load();
+      // CRITICAL iOS requirements - set BEFORE any async operations
+      video.muted = true;
+      video.volume = 0;
+      video.playsInline = true; // Property in addition to attribute
+      
+      // CRITICAL: Call play() IMMEDIATELY while still in user gesture context
+      // iOS will reject play() if called after any await/Promise
+      const playPromise = video.play();
+      
+      console.log('[VersionCard] play() called immediately in gesture handler');
+      
+      // Now handle the async parts AFTER play() was initiated
+      playPromise.catch((err) => {
+        console.error('[VersionCard] Initial play() rejected:', err);
+        throw err;
       });
       
-      // Seek to 30s (or start if video is shorter)
+      // Wait for metadata (but play() already called)
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Metadata load timeout')), 10000);
+        video.onloadedmetadata = () => {
+          clearTimeout(timeout);
+          resolve(true);
+        };
+        video.onerror = (e) => {
+          clearTimeout(timeout);
+          reject(e);
+        };
+      });
+      
+      console.log('[VersionCard] Metadata loaded, duration:', video.duration);
+      
+      // Wait for video to start playing
+      await new Promise((resolve) => {
+        const timeout = setTimeout(resolve, 1000);
+        const checkPlaying = () => {
+          if (!video.paused && video.readyState >= 2) {
+            clearTimeout(timeout);
+            resolve(true);
+          }
+        };
+        video.oncanplay = checkPlaying;
+        video.onplaying = checkPlaying;
+        checkPlaying();
+      });
+      
+      console.log('[VersionCard] Video playing, seeking to preview position');
+      
+      // Seek to preview position (30s mark)
       const seekTime = Math.min(30, (video.duration || 30) - 10);
       video.currentTime = seekTime;
       
-      // Attempt playback
-      await video.play();
+      // Wait for seek
+      await new Promise((resolve) => {
+        const timeout = setTimeout(resolve, 500);
+        video.onseeked = () => {
+          clearTimeout(timeout);
+          resolve(true);
+        };
+      });
+      
+      console.log('[VersionCard] Seek complete, unmuting');
+      
+      // Unmute after everything is stable
+      video.muted = false;
+      video.volume = 0.5;
+      
+      console.log('[VersionCard] Preview playing successfully');
       setIsPlaying(true);
       setLoading(false);
       
@@ -200,8 +258,8 @@ export function VersionCard({ version, onAddToQueue, isActive = false, onPreview
               style={{
                 fontSize: '0.75rem',
                 padding: '4px 10px',
-                background: version.tone === 'nam' ? '#E3F2FD' : '#FCE4EC',
-                color: version.tone === 'nam' ? '#1976D2' : '#C2185B',
+                background: version.tone.toLowerCase() === 'nam' ? '#E3F2FD' : '#FCE4EC',
+                color: version.tone.toLowerCase() === 'nam' ? '#1976D2' : '#C2185B',
                 borderRadius: '16px',
                 fontWeight: '600',
                 display: 'flex',
@@ -209,7 +267,7 @@ export function VersionCard({ version, onAddToQueue, isActive = false, onPreview
                 gap: '4px',
               }}
             >
-              {version.tone === 'nam' ? '👨 Male' : '👩 Female'}
+              {version.tone.toLowerCase() === 'nam' ? '👨 Male' : '👩 Female'}
             </span>
           )}
 
@@ -242,22 +300,6 @@ export function VersionCard({ version, onAddToQueue, isActive = false, onPreview
               }}
             >
               🎵 {version.style.toUpperCase()}
-            </span>
-          )}
-
-          {/* Pitch */}
-          {version.pitch && (
-            <span
-              style={{
-                fontSize: '0.75rem',
-                padding: '4px 10px',
-                background: '#E8F5E9',
-                color: '#2E7D32',
-                borderRadius: '16px',
-                fontWeight: '500',
-              }}
-            >
-              🎹 {version.pitch}
             </span>
           )}
 

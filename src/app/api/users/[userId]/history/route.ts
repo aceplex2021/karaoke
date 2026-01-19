@@ -27,7 +27,15 @@ export async function GET(
       .from('kara_song_history')
       .select(`
         *,
-        kara_songs(*)
+        kara_versions (
+          id,
+          title_display,
+          tone,
+          mixer,
+          style,
+          artist_name,
+          performance_type
+        )
       `)
       .eq('user_id', userId)
       .gte('sung_at', twelveMonthsAgo.toISOString())
@@ -46,11 +54,24 @@ export async function GET(
     
     console.log('[users/history] Found', history?.length || 0, 'history entries');
     
-    // Map kara_songs to song for backward compatibility
-    const mapped = (history || []).map(item => ({
-      ...item,
-      song: (item as any).kara_songs,
-    }));
+    // Map kara_versions to song/version for backward compatibility
+    const mapped = (history || []).map(item => {
+      const version = (item as any).kara_versions;
+      return {
+        ...item,
+        version: version || null,
+        // Also provide as 'song' for backward compatibility
+        song: version ? {
+          id: version.id,
+          title: version.title_display,
+          artist: version.artist_name,
+          tone: version.tone,
+          mixer: version.mixer,
+          style: version.style,
+          performance_type: version.performance_type
+        } : null
+      };
+    });
     
     return NextResponse.json({ history: mapped });
   } catch (error: unknown) {

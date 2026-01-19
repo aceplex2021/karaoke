@@ -6,63 +6,29 @@ import type { VersionSearchResult, VersionSearchResponse } from '@/shared/types'
 export const dynamic = 'force-dynamic';
 
 /**
- * Build play URL from storage_path (basename only)
+ * Build play URL from storage_path
+ * Strip /Videos/ prefix since media server base URL already points to videos directory
  */
 function buildPlayUrl(storagePath: string): string {
-  if (!storagePath) return '';
+  // Remove /Videos/ or Videos/ prefix if present
+  let cleanPath = storagePath.replace(/^\/Videos\//i, '').replace(/^Videos\//i, '');
   
-  // Extract basename (remove folder prefixes)
-  let decoded = decodeURIComponent(storagePath);
-  decoded = decoded.trim().replace(/^[/\\]+|[/\\]+$/g, '');
-  const parts = decoded.split(/[/\\]+/);
-  const basename = parts[parts.length - 1];
-  
-  return `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
+  // Encode only the filename (not the whole path)
+  const encoded = encodeURIComponent(cleanPath);
+  return `${config.mediaServer.baseUrl}/${encoded}`;
 }
 
 /**
- * Parse label to extract tone and style
- * Examples: "nam", "nu_beat", "nam_acoustic", "beat"
- */
-function parseLabel(label: string | null): {
-  tone: string | null;
-  style: string | null;
-} {
-  if (!label) return { tone: null, style: null };
-  
-  const lower = label.toLowerCase().trim();
-  
-  // Extract tone
-  let tone: string | null = null;
-  if (lower === 'nam' || lower.startsWith('nam_')) {
-    tone = 'nam';
-  } else if (lower === 'nu' || lower.startsWith('nu_')) {
-    tone = 'nu';
-  }
-  
-  // Extract style (everything after tone, or the whole label if no tone)
-  let style: string | null = null;
-  if (tone && lower.includes('_')) {
-    style = lower.split('_').slice(1).join('_');
-  } else if (!tone && lower !== 'nam' && lower !== 'nu') {
-    style = lower;
-  }
-  
-  return { tone, style };
-}
-
-/**
- * YouTube-like search: Flat list of versions
+ * YouTube-like search: Flat list of versions (updated for new schema)
  * One card per version, no grouping
  * 
- * This queries kara_song_versions_detail_view but enhances it with data
- * from kara_versions and kara_files for complete metadata
+ * This is identical to /api/songs/search but kept for backward compatibility
  */
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const q = searchParams.get('q');
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const limit = parseInt(searchParams.get('limit') || '100', 10);
     
     console.log('[search-versions] Query:', { q, limit });
 
@@ -75,39 +41,40 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const searchTerm = q.trim().toLowerCase();
+    const searchTerm = q.trim();
+    
+    // Normalize search term (remove accents for matching English keyboard)
+    const normalizedSearch = searchTerm
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd');
 
-    // Query using kara_song_versions_detail_view as base,
-    // but join with kara_versions and kara_files for complete data
-    const { data: versions, error, count } = await supabaseAdmin
-      .from('kara_files')
+    // Query kara_versions directly (simplified schema)
+    // Search BOTH normalized_title (English keyboard) AND title_display (Vietnamese keyboard)
+    const { data: versions, error } = await supabaseAdmin
+      .from('kara_versions')
       .select(`
         id,
-        version_id,
-        storage_path,
-        duration_seconds,
-        kara_versions!inner (
+        title_display,
+        normalized_title,
+        tone,
+        mixer,
+        style,
+        artist_name,
+        performance_type,
+        key,
+        tempo,
+        is_default,
+        kara_files!inner (
           id,
-          song_id,
-          label,
-          key,
-          tempo,
-          kara_songs!inner (
-            id,
-            title_display,
-            artist_name,
-            kara_song_group_members!inner (
-              group_id,
-              kara_song_groups!inner (
-                base_title_display
-              )
-            )
-          )
+          storage_path,
+          duration_seconds,
+          type
         )
-      `, { count: 'exact' })
-      .eq('type', 'video')
-      .ilike('kara_versions.kara_songs.title_display', `%${searchTerm}%`)
-      .order('storage_path', { ascending: true })
+      `)
+      .or(`normalized_title.ilike.%${normalizedSearch}%,title_display.ilike.%${searchTerm}%`)
+      .eq('kara_files.type', 'video')
       .limit(limit);
 
     if (error) {
@@ -122,48 +89,48 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Map to VersionSearchResult and deduplicate by version_id
-    // (multiple files can have same version_id, take first one)
-    const versionMap = new Map<string, VersionSearchResult>();
-    
-    for (const file of versions) {
-      const version = file.kara_versions;
-      const song = version.kara_songs;
-      const groupMember = Array.isArray(song.kara_song_group_members) 
-        ? song.kara_song_group_members[0] 
-        : song.kara_song_group_members;
-      const group = groupMember?.kara_song_groups;
-      
-      const { tone, style } = parseLabel(version.label);
-      
-      // Skip if we already have this version
-      if (versionMap.has(file.version_id)) {
-        continue;
-      }
-      
-      versionMap.set(file.version_id, {
-        version_id: file.version_id,
-        song_id: version.song_id,
-        song_title: group?.base_title_display || song.title_display || 'Untitled',
-        artist_name: song.artist_name || null,
-        tone,
-        mixer: null, // Extracted from storage_path in view, not available here
-        style,
-        pitch: version.key || null,
-        tempo: version.tempo || null,
-        storage_path: file.storage_path,
-        duration_seconds: file.duration_seconds || null,
-        play_url: buildPlayUrl(file.storage_path),
+    // Format results (flat list)
+    const results: VersionSearchResult[] = versions
+      .filter(v => v.kara_files && v.kara_files.length > 0)
+      .map((v: any) => {
+        const file = Array.isArray(v.kara_files) ? v.kara_files[0] : v.kara_files;
+        return {
+          version_id: v.id,
+          song_id: v.id, // version IS the song in new schema
+          song_title: v.title_display,
+          artist_name: v.artist_name || null,
+          tone: v.tone || null,
+          mixer: v.mixer || null,
+          style: v.style || null,
+          pitch: v.key || null,
+          tempo: v.tempo || null,
+          storage_path: file.storage_path,
+          duration_seconds: file.duration_seconds || null,
+          play_url: buildPlayUrl(file.storage_path),
+        };
       });
-    }
 
-    const results = Array.from(versionMap.values());
-    console.log(`[search-versions] Found ${results.length} unique versions (from ${versions.length} files)`);
+    // Sort: exact matches first, then alphabetical
+    const searchTermLower = searchTerm.toLowerCase();
+    results.sort((a, b) => {
+      const titleA = (a.song_title || '').toLowerCase();
+      const titleB = (b.song_title || '').toLowerCase();
+      
+      const aExact = titleA.startsWith(searchTermLower);
+      const bExact = titleB.startsWith(searchTermLower);
+      
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      
+      return titleA.localeCompare(titleB);
+    });
+
+    console.log(`[search-versions] Found ${results.length} versions`);
 
     return NextResponse.json<VersionSearchResponse>({
       query: searchTerm,
       results,
-      total: count || results.length,
+      total: results.length,
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

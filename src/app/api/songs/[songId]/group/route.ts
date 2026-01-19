@@ -3,12 +3,8 @@ import { supabaseAdmin } from '@/server/lib/supabase';
 
 /**
  * GET /api/songs/[songId]/group
- * Get the song group for a specific song_id (used for History/Favorites)
- */
-/**
- * GET /api/songs/[songId]/group
- * Get song group for a song_id from History/Favorites
- * Returns full SongGroupResult format (same as search API)
+ * Get song group for a version_id (updated for new schema)
+ * In new schema: songId is actually a version_id
  */
 export async function GET(
   request: NextRequest,
@@ -16,27 +12,54 @@ export async function GET(
 ) {
   try {
     const { songId } = params;
-    console.log('[songs/songId/group] Looking up group for song_id:', songId);
+    console.log('[songs/songId/group] Looking up group for version_id:', songId);
 
-    // Find group_id through kara_song_group_members
-    const { data: membership, error: memberError } = await supabaseAdmin
-      .from('kara_song_group_members')
-      .select('group_id')
-      .eq('song_id', songId)
+    // Get version directly (in new schema, version_id IS the song)
+    const { data: version, error: versionError } = await supabaseAdmin
+      .from('kara_versions')
+      .select(`
+        id,
+        group_id,
+        title_display,
+        tone,
+        mixer,
+        style,
+        artist_name,
+        performance_type,
+        key,
+        tempo,
+        label,
+        is_default
+      `)
+      .eq('id', songId)
       .single();
 
-    if (memberError || !membership) {
-      console.error('[songs/songId/group] Song not in any group:', memberError);
+    if (versionError || !version) {
+      console.error('[songs/songId/group] Version not found:', versionError);
       return NextResponse.json(
-        { error: 'Song not found in any group' },
+        { error: 'Version not found' },
         { status: 404 }
       );
     }
 
-    const groupId = membership.group_id;
+    // If no group_id, return minimal result
+    if (!version.group_id) {
+      return NextResponse.json({
+        version: {
+          version_id: version.id,
+          title: version.title_display,
+          tone: version.tone,
+          mixer: version.mixer,
+          style: version.style,
+          artist_name: version.artist_name,
+        }
+      });
+    }
+
+    const groupId = version.group_id;
     console.log('[songs/songId/group] Found group_id:', groupId);
 
-    // Get group info from kara_song_groups
+    // Get group info
     const { data: group, error: groupError } = await supabaseAdmin
       .from('kara_song_groups')
       .select('base_title_display, base_title_unaccent')
@@ -48,38 +71,16 @@ export async function GET(
       return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
 
-    // Get all members (songs) in this group
-    const { data: members } = await supabaseAdmin
-      .from('kara_song_group_members')
-      .select('song_id')
-      .eq('group_id', groupId);
-
-    if (!members || members.length === 0) {
-      return NextResponse.json({ error: 'No songs in group' }, { status: 404 });
-    }
-
-    const songIds = members.map(m => m.song_id);
-
-    // Get artists
-    const { data: songs } = await supabaseAdmin
-      .from('kara_songs')
-      .select('artist_id')
-      .in('id', songIds);
-
-    const artistIds = [...new Set((songs || []).map(s => s.artist_id).filter(Boolean))];
-    const { data: artists } = await supabaseAdmin
-      .from('kara_artists')
-      .select('name')
-      .in('id', artistIds);
-
-    const artistNames = (artists || []).map(a => a.name).filter(Boolean);
-
-    // Get versions with files
-    const { data: versions } = await supabaseAdmin
+    // Get all versions in this group
+    const { data: allVersions } = await supabaseAdmin
       .from('kara_versions')
       .select(`
         id,
-        song_id,
+        title_display,
+        tone,
+        mixer,
+        style,
+        artist_name,
         label,
         key,
         tempo,
@@ -87,48 +88,31 @@ export async function GET(
         kara_files!inner (
           id,
           storage_path,
-          type,
-          duration_seconds
+          type
         )
       `)
-      .in('song_id', songIds)
+      .eq('group_id', groupId)
       .eq('kara_files.type', 'video');
 
-    if (!versions || versions.length === 0) {
-      return NextResponse.json({ error: 'No versions found' }, { status: 404 });
-    }
+    const versions = (allVersions || []).filter(v => v.kara_files && v.kara_files.length > 0);
 
-    // Format versions
-    const groupVersions = versions
-      .filter(v => v.kara_files && v.kara_files.length > 0)
-      .map((v: any) => {
-        const file = Array.isArray(v.kara_files) ? v.kara_files[0] : v.kara_files;
-        return {
-          id: v.id,
-          song_id: v.song_id,
-          label: v.label,
-          key: v.key,
-          tempo: v.tempo,
-          is_default: v.is_default,
-          file: {
-            id: file.id,
-            storage_path: file.storage_path,
-          },
-        };
-      });
-
-    // Select best version (prefer nam, non-remix, is_default)
-    const namVersions = groupVersions.filter(v => v.label && (v.label === 'nam' || v.label.startsWith('nam_')));
-    const bestVersion = namVersions.length > 0 
-      ? namVersions.sort((a, b) => a.id.localeCompare(b.id))[0]
-      : groupVersions.find(v => v.is_default) || groupVersions[0];
+    // Get unique artists from versions
+    const artistNames = [...new Set(versions.map(v => v.artist_name).filter(Boolean))];
 
     // Get tones and styles
-    const allLabels = groupVersions.map(v => v.label).filter(Boolean);
-    const tones = [...new Set(allLabels.filter(l => l === 'nam' || l === 'nu' || l.startsWith('nam_') || l.startsWith('nu_')))];
-    const styles = [...new Set(allLabels.filter(l => !tones.includes(l)))];
+    const tones = [...new Set(versions.map(v => v.tone).filter(Boolean))];
+    const styles = [...new Set(versions.map(v => v.style).filter(Boolean))];
 
-    // Build SongGroupResult (same format as search API)
+    // Find best version (prefer nam, is_default)
+    const namVersions = versions.filter(v => v.tone?.toLowerCase() === 'nam');
+    const bestVersion = namVersions.find(v => v.is_default) 
+      || namVersions[0]
+      || versions.find(v => v.is_default)
+      || versions[0];
+
+    const bestFile = Array.isArray(bestVersion.kara_files) ? bestVersion.kara_files[0] : bestVersion.kara_files;
+
+    // Build result
     const result = {
       group_id: groupId,
       display_title: group.base_title_display || group.base_title_unaccent,
@@ -137,16 +121,18 @@ export async function GET(
       best_version: {
         version_id: bestVersion.id,
         label: bestVersion.label || null,
-        tone: bestVersion.label === 'nam' || bestVersion.label?.startsWith('nam_') ? 'nam' :
-              bestVersion.label === 'nu' || bestVersion.label?.startsWith('nu_') ? 'nu' : null,
+        tone: bestVersion.tone || null,
         pitch: bestVersion.key || null,
         tempo: bestVersion.tempo || null,
         is_default: bestVersion.is_default || false,
         styles: bestVersion.label ? [bestVersion.label] : [],
-        file: bestVersion.file,
+        file: {
+          id: bestFile.id,
+          storage_path: bestFile.storage_path,
+        },
       },
       available: {
-        version_count: groupVersions.length,
+        version_count: versions.length,
         tones,
         styles,
       },

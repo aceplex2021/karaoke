@@ -1,58 +1,23 @@
 // dbUpsert.js
+// Updated for simplified schema: kara_versions is the main table
+// No more kara_songs - versions are the atomic unit
 import { getSupabase } from "./supabase.js";
 import { toTitleCase } from "./titleCase.js";
 
 /**
- * Use parser-computed semantic label for kara_versions.label
+ * Compute base title for grouping (remove accents, lowercase, trim)
  */
-function resolveVersionLabel(meta) {
-  const label = meta?.label?.trim();
-  return label || "original";
-}
-
-/**
- * Optional: store musical key if detected (Bm/Ebm/F#m/etc).
- */
-function resolveKey(meta) {
-  const key = meta?.key?.trim?.() || meta?.key || null;
-  return key || null;
-}
-
-/**
- * Lookup language_id by code
- */
-async function getLanguageIdByCode(code) {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from("kara_languages")
-    .select("id")
-    .eq("code", code)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data?.id) {
-    throw new Error(
-      `Language code '${code}' not found in kara_languages. Seed it first or create it in DB.`
-    );
-  }
-
-  return data.id;
-}
-
-/**
- * Best-effort base key (only used as fallback).
- * DB trigger is the source of truth now.
- */
-function computeBaseTitleKeyFromNormalizedTitle(normalizedTitle) {
+function computeBaseTitleFromNormalized(normalizedTitle) {
   let s = String(normalizedTitle || "").toLowerCase().trim();
   if (!s) return "";
 
+  // Remove pipes and extra whitespace
   while (s.startsWith("｜") || s.startsWith("|")) s = s.slice(1).trim();
   const seg = (s.split("｜")[0] ?? s).trim();
   const seg2 = (seg.split("|")[0] ?? seg).trim();
   const collapsed = seg2.replace(/\s+/g, " ").trim();
 
+  // Remove accents
   const folded = collapsed
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -62,22 +27,56 @@ function computeBaseTitleKeyFromNormalizedTitle(normalizedTitle) {
 }
 
 /**
- * Ensure group + membership exists for (songId, base_title_unaccent)
- * - creates group if missing
- * - inserts membership (ignores duplicates)
+ * Get language ID by code
  */
-async function ensureSongGroupMembership({ songId, baseTitleUnaccent, displayTitle }) {
+async function getLanguageIdByCode(code) {
   const supabase = getSupabase();
 
-  const key = String(baseTitleUnaccent || "").trim();
-  if (!key) return null;
+  try {
+    const { data, error } = await supabase
+      .from("kara_languages")
+      .select("id")
+      .eq("code", code)
+      .maybeSingle();
 
-  // 1) Create or fetch group
-  const { data: group, error: gErr } = await supabase
+    if (error) {
+      console.error(`[getLanguageIdByCode] Supabase error:`, {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      throw error;
+    }
+    if (!data?.id) {
+      throw new Error(`Language code '${code}' not found. Seed kara_languages first.`);
+    }
+
+    return data.id;
+  } catch (err) {
+    console.error(`[getLanguageIdByCode] Fetch/Network error:`, {
+      name: err.name,
+      message: err.message,
+      cause: err.cause,
+      stack: err.stack?.split('\n').slice(0, 5).join('\n')
+    });
+    throw err;
+  }
+}
+
+/**
+ * Create or get song group (for UI grouping only)
+ */
+async function ensureGroup({ baseTitle, displayTitle }) {
+  const supabase = getSupabase();
+  
+  if (!baseTitle) return null;
+
+  const { data, error } = await supabase
     .from("kara_song_groups")
     .upsert(
       {
-        base_title_unaccent: key,
+        base_title_unaccent: baseTitle,
         base_title_display: displayTitle || null,
       },
       { onConflict: "base_title_unaccent" }
@@ -85,155 +84,126 @@ async function ensureSongGroupMembership({ songId, baseTitleUnaccent, displayTit
     .select("id")
     .single();
 
-  if (gErr) throw gErr;
-
-  // 2) Create membership (ignore duplicates)
-  const { error: mErr } = await supabase
-    .from("kara_song_group_members")
-    .insert({ group_id: group.id, song_id: songId });
-
-  if (mErr) {
-    const msg = (mErr.message || "").toLowerCase();
-    if (msg.includes("duplicate") || msg.includes("unique")) return group;
-    throw mErr;
-  }
-
-  return group;
-}
-
-/**
- * Upsert kara_songs using (normalized_title, language_id) uniqueness.
- * NOTE: DB trigger now fills base_title/base_title_unaccent automatically.
- */
-async function upsertSong({ meta, languageId }) {
-  const supabase = getSupabase();
-
-  const normalized = meta.normalized_title;
-  const displayTitle = toTitleCase(meta.title_clean);
-
-  if (!normalized) throw new Error("meta.normalized_title is required");
-  if (!displayTitle) throw new Error("meta.title_clean is required");
-
-  const payload = {
-    title: displayTitle, // legacy column
-    title_display: displayTitle,
-    normalized_title: normalized,
-    language_id: languageId,
-    is_active: true,
-  };
-
-  const { data, error } = await supabase
-    .from("kara_songs")
-    .upsert(payload, { onConflict: "normalized_title,language_id" })
-    // include base_title_unaccent so we can group immediately
-    .select("id,normalized_title,title_display,base_title_unaccent")
-    .single();
-
-  if (error) throw error;
-  return data; // { id, normalized_title, title_display, base_title_unaccent }
-}
-
-/**
- * Get or create a kara_versions row for (song_id, label)
- * Also patches key if detected and missing.
- */
-async function getOrCreateVersion({ songId, label, key }) {
-  const supabase = getSupabase();
-
-  const { data: existing, error: selErr } = await supabase
-    .from("kara_versions")
-    .select("id,key")
-    .eq("song_id", songId)
-    .eq("label", label)
-    .maybeSingle();
-
-  if (selErr) throw selErr;
-
-  if (existing?.id) {
-    if (key && !existing.key) {
-      const { error: updErr } = await supabase
-        .from("kara_versions")
-        .update({ key })
-        .eq("id", existing.id);
-
-      if (updErr) throw updErr;
-    }
-    return existing; // { id, key }
-  }
-
-  const { data: created, error: insErr } = await supabase
-    .from("kara_versions")
-    .insert({
-      song_id: songId,
-      label,
-      key: key || null,
-      is_default: label === "original",
-    })
-    .select("id")
-    .single();
-
-  if (insErr) throw insErr;
-  return created; // { id }
-}
-
-/**
- * Insert a kara_files row (video asset).
- * If UNIQUE(storage_path) exists, duplicates will be skipped.
- */
-async function insertFile({ versionId, relativePath }) {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from("kara_files")
-    .insert({
-      version_id: versionId,
-      type: "video",
-      storage_path: relativePath,
-      format: "mp4",
-    })
-    .select("id")
-    .single();
-
   if (error) {
-    const msg = (error.message || "").toLowerCase();
-    if (msg.includes("duplicate") || msg.includes("unique")) return null;
-    throw error;
+    console.warn("⚠️  Group creation failed (non-blocking):", error.message);
+    return null;
   }
 
-  return data; // { id }
+  return data;
 }
 
 /**
- * Public API used by scanVideos.js / watchVideos.js when WRITE_DB=true
+ * Main upsert function - writes ALL parsed metadata to kara_versions
+ * This is the simplified version that writes directly to kara_versions
+ * (no more kara_songs table!)
  */
 export async function upsertSongVersionFile({
   meta,
   relativePath,
   defaultLanguageCode = "vi",
 }) {
-  const languageId = await getLanguageIdByCode(defaultLanguageCode);
+  const supabase = getSupabase();
 
-  const song = await upsertSong({ meta, languageId });
-
-  // Group membership (should never block ingestion)
   try {
-    const baseKey =
-      String(song.base_title_unaccent || "").trim() ||
-      computeBaseTitleKeyFromNormalizedTitle(song.normalized_title);
+    console.log(`[upsert] START: ${relativePath}`);
+    
+    // 1. Get language ID
+    const languageId = await getLanguageIdByCode(defaultLanguageCode);
+    console.log(`[upsert] languageId: ${languageId}`);
 
-    await ensureSongGroupMembership({
-      songId: song.id,
-      baseTitleUnaccent: baseKey,
-      displayTitle: song.title_display,
+    // 2. Compute base title for grouping
+    const baseTitle = computeBaseTitleFromNormalized(meta.normalized_title);
+    const displayTitle = toTitleCase(meta.title_clean || meta.title_display);
+
+    // 3. Ensure group exists (optional, for UI)
+    let groupId = null;
+    try {
+      const group = await ensureGroup({ baseTitle, displayTitle });
+      groupId = group?.id || null;
+      console.log(`[upsert] groupId: ${groupId || 'none'}`);
+    } catch (e) {
+      console.warn("⚠️  Group creation failed (non-blocking):", e.message);
+    }
+
+    // 4. Upsert version with ALL parser fields
+    const versionPayload = {
+      group_id: groupId,
+      
+      // Title fields
+      title_display: displayTitle,
+      title_clean: meta.title_clean || displayTitle,
+      normalized_title: meta.normalized_title,
+      base_title_unaccent: baseTitle,
+      
+      // Metadata from parser
+      tone: meta.tone || null,
+      mixer: meta.mixer || meta.channel || null,  // Parser returns both
+      style: meta.style || null,
+      artist_name: meta.artist_name || null,
+      performance_type: meta.performance_type || 'solo',
+      is_tram: meta.is_tram || false,
+      
+      // Musical metadata
+      key: meta.key || null,
+      tempo: null,  // Parser doesn't extract this yet
+      label: meta.label || 'original',
+      
+      // System fields
+      language_id: languageId,
+      is_default: !meta.label || meta.label === 'original',
+    };
+
+    const { data: version, error: versionError } = await supabase
+      .from("kara_versions")
+      .upsert(versionPayload, {
+        onConflict: "normalized_title,language_id,label",
+      })
+      .select("id")
+      .single();
+
+    if (versionError) {
+      console.error(`[upsert] Version upsert failed:`, {
+        message: versionError.message,
+        code: versionError.code,
+        details: versionError.details
+      });
+      throw versionError;
+    }
+    
+    console.log(`[upsert] versionId: ${version.id}`);
+
+    // 5. Insert file record
+    const { error: fileError } = await supabase
+      .from("kara_files")
+      .insert({
+        version_id: version.id,
+        type: "video",
+        storage_path: relativePath,
+        format: "mp4",
+      });
+
+    if (fileError) {
+      const msg = (fileError.message || "").toLowerCase();
+      // Ignore duplicate errors (file already exists)
+      if (!msg.includes("duplicate") && !msg.includes("unique")) {
+        console.error(`[upsert] File insert failed:`, {
+          message: fileError.message,
+          code: fileError.code
+        });
+        throw fileError;
+      }
+      console.log(`[upsert] File already exists (OK): ${relativePath}`);
+    }
+
+    console.log(`[upsert] SUCCESS: ${relativePath}`);
+    return version;
+  } catch (err) {
+    console.error(`[upsert] FAILED: ${relativePath}`, {
+      name: err.name,
+      message: err.message,
+      cause: err.cause?.message || err.cause,
+      code: err.code
     });
-  } catch (e) {
-    console.error("WARN: grouping failed (non-blocking):", e?.message || e);
+    throw err;
   }
-
-  const label = resolveVersionLabel(meta);
-  const key = resolveKey(meta);
-
-  const version = await getOrCreateVersion({ songId: song.id, label, key });
-
-  return await insertFile({ versionId: version.id, relativePath });
 }

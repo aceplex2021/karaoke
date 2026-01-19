@@ -73,6 +73,13 @@ function canonicalNameFromCollision(filePath) {
 // ------------------------------------------------------------
 const pending = new Map(); // filePath -> timeout
 
+// ------------------------------------------------------------
+// Global throttle to prevent overwhelming Supabase
+// ------------------------------------------------------------
+let activeProcessing = 0;
+const MAX_CONCURRENT = 3; // Only process 3 files at a time
+const processingQueue = []; // Queue of pending {filePath, watchedDirs, dirWatchers}
+
 function safeUnlink(p) {
   try {
     fs.unlinkSync(p);
@@ -178,6 +185,7 @@ function unwatchDir(dir, watchedDirs, dirWatchers) {
 }
 
 // Build the meta shape expected by dbUpsert.js from parseFilename() output
+// Updated for simplified schema: pass ALL parser fields to kara_versions
 function metaForDbFromParsed(p) {
   const normalized =
     p?.normalized_title ||
@@ -188,35 +196,46 @@ function metaForDbFromParsed(p) {
 
   const titleClean =
     p?.title_clean || p?.titleClean || p?.title_cleaned || p?.title || null;
+  
+  const titleDisplay =
+    p?.title_display || p?.titleDisplay || titleClean || null;
+
+  // Extract ALL metadata from parser FIRST (to avoid duplicate const declarations)
+  const artistName = (p?.artist_name || p?.artistName || p?.artist)?.trim() || null;
+  const performanceType = (p?.performance_type || p?.performanceType || p?.performance)?.trim() || 'solo';
+  const tone = (p?.tone || p?.toneName)?.trim() || null;
+  const mixer = (p?.mixer || p?.channel)?.trim() || null;
+  const style = (p?.style || p?.styleName)?.trim() || null;
+  const isTram = !!(p?.is_tram || p?.isTram || p?.tram);
 
   // Prefer parser-provided label if present; else derive one
   let label = (p?.label || "").trim();
   if (!label) {
-    const tone = p?.tone ? String(p.tone).trim() : "";
-    const tram = !!p?.tram;
-    const style = p?.style ? String(p.style).trim() : "";
+    const toneLC = tone ? tone.toLowerCase() : "";
+    const styleLC = style ? style.toLowerCase() : "";
 
-    if (tone && tram) label = `${tone}_tram`;
-    else if (tone && style) label = `${tone}_${style}`;
-    else if (tone) label = tone;
-    else if (tram) label = "tram";
-    else if (style) label = style;
+    if (toneLC && isTram) label = `${toneLC}_tram`;
+    else if (toneLC && styleLC) label = `${toneLC}_${styleLC}`;
+    else if (toneLC) label = toneLC;
+    else if (isTram) label = "tram";
+    else if (styleLC) label = styleLC;
     else label = "original";
   }
 
   const key = (p?.key && String(p.key).trim()) || null;
-  
-  // Extract artist_name and performance_type from parser
-  const artistName = (p?.artist_name || p?.artistName || p?.artist)?.trim() || null;
-  const performanceType = (p?.performance_type || p?.performanceType || p?.performance)?.trim() || 'solo';
 
   return {
     normalized_title: normalized,
     title_clean: titleClean,
+    title_display: titleDisplay,
     label,
     key,
+    tone,
+    mixer,
+    style,
     artist_name: artistName,
     performance_type: performanceType,
+    is_tram: isTram,
   };
 }
 
@@ -326,128 +345,159 @@ async function handleCollisionInIncoming(filePath, watchedDirs, dirWatchers) {
   return { action: "promote" };
 }
 
+async function processFileFromQueue() {
+  if (processingQueue.length === 0) {
+    activeProcessing--;
+    return;
+  }
+
+  const { filePath, watchedDirs, dirWatchers } = processingQueue.shift();
+
+  if (!fs.existsSync(filePath)) {
+    activeProcessing--;
+    processNextInQueue();
+    return;
+  }
+
+  // Handle MeTube collision files
+  if (isCollisionVideo(filePath)) {
+    try {
+      const res = await handleCollisionInIncoming(filePath, watchedDirs, dirWatchers);
+      if (res.action === "retry") {
+        schedulePromote(filePath, watchedDirs, dirWatchers);
+      }
+    } catch (e) {
+      console.error(`❌ collision handling failed: ${path.basename(filePath)} ->`, e?.message || e);
+    }
+    activeProcessing--;
+    processNextInQueue();
+    return;
+  }
+
+  // Wait until the file looks finished (prevents promoting mid-write)
+  const stable = await waitForStableFile(filePath);
+  if (!stable) {
+    schedulePromote(filePath, watchedDirs, dirWatchers);
+    activeProcessing--;
+    processNextInQueue();
+    return;
+  }
+
+  try {
+    const { status, dst } = await promoteFile(filePath);
+    const parentDir = path.dirname(filePath);
+
+    if (status === "linked") {
+      // DB upsert happens ONLY here (post-hardlink), and uses canonical /Videos path
+      if (writeDb && upsertSongVersionFile && dst) {
+        try {
+          // Add delay to prevent connection pool exhaustion during bulk processing
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          const parsed = parseFilename(path.basename(filePath));
+          const meta = metaForDbFromParsed(parsed);
+          const relativePath = storagePathFromDst(dst);
+
+          await upsertSongVersionFile({
+            meta,
+            relativePath,
+            defaultLanguageCode: "vi",
+          });
+
+          console.log(`🗄️  upserted metadata: ${path.basename(dst)}`);
+        } catch (e) {
+          console.error(
+            `❌ DB upsert failed (will NOT block ingestion): ${path.basename(dst || filePath)} ->`,
+            e?.message || e
+          );
+        }
+      }
+
+      // Delete incoming file
+      safeUnlink(filePath);
+      console.log(`✅ promoted+deleted incoming: ${path.basename(filePath)}`);
+
+      // Cleanup + prune
+      postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
+    } else if (status === "exists" && dst) {
+      // If exists, we only delete incoming if same inode
+      try {
+        const a = fs.statSync(filePath);
+        const b = fs.statSync(dst);
+
+        if (a.ino === b.ino) {
+          safeUnlink(filePath);
+          console.log(`↩️  already promoted; deleted incoming: ${path.basename(filePath)}`);
+
+          postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
+        } else {
+          // canonical exists but different inode
+          const incomingBase = path.basename(filePath);
+          const dstBase = path.basename(dst);
+
+          if (incomingBase === dstBase) {
+            // same logical title -> delete incoming duplicate
+            safeUnlink(filePath);
+            console.log(`🧹 deleted incoming duplicate (canonical exists): ${incomingBase}`);
+            postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
+          } else {
+            console.log(
+              `⚠️  canonical exists but inode differs; NOT deleting incoming: ${incomingBase}`
+            );
+            console.log(`    incoming: ${filePath}`);
+            console.log(`    canonical: ${dst}`);
+          }
+        }
+      } catch (e) {
+        console.error(
+          `❌ inode check failed; NOT deleting incoming: ${path.basename(filePath)} ->`,
+          e?.code || "",
+          e?.message || e
+        );
+      }
+    } else {
+      console.log(`⏭️  skipped: ${path.basename(filePath)}`);
+    }
+  } catch (e) {
+    console.error(`❌ promote failed: ${path.basename(filePath)} ->`, e?.code || "", e?.message || e);
+  }
+
+  // Done with this file, process next
+  activeProcessing--;
+  processNextInQueue();
+}
+
+function processNextInQueue() {
+  while (activeProcessing < MAX_CONCURRENT && processingQueue.length > 0) {
+    activeProcessing++;
+    processFileFromQueue().catch(err => {
+      console.error(`❌ queue processing error:`, err);
+      activeProcessing--;
+      processNextInQueue();
+    });
+  }
+}
+
 function schedulePromote(filePath, watchedDirs, dirWatchers) {
   // Only process video files
   if (!isVideoFile(filePath)) return;
 
   // Skip intermediates (never promote these)
   if (isBadIntermediateVideo(filePath)) {
-    // Do NOT delete: could be mid-download; just ignore.
     return;
   }
 
   // clear prior timer
   if (pending.has(filePath)) clearTimeout(pending.get(filePath));
 
-  const t = setTimeout(async () => {
+  const t = setTimeout(() => {
     pending.delete(filePath);
 
     if (!fs.existsSync(filePath)) return;
 
-    // Handle MeTube collision files
-    if (isCollisionVideo(filePath)) {
-      try {
-        const res = await handleCollisionInIncoming(filePath, watchedDirs, dirWatchers);
-        if (res.action === "retry") {
-          // re-schedule a bit later
-          schedulePromote(filePath, watchedDirs, dirWatchers);
-        }
-      } catch (e) {
-        console.error(`❌ collision handling failed: ${path.basename(filePath)} ->`, e?.message || e);
-      }
-      return;
-    }
-
-    // Wait until the file looks finished (prevents promoting mid-write)
-    const stable = await waitForStableFile(filePath);
-    if (!stable) {
-      // Try again later; MeTube may still be merging/writing
-      schedulePromote(filePath, watchedDirs, dirWatchers);
-      return;
-    }
-
-    try {
-      const { status, dst } = await promoteFile(filePath);
-      const parentDir = path.dirname(filePath);
-
-      if (status === "linked") {
-        // DB upsert happens ONLY here (post-hardlink), and uses canonical /Videos path
-        if (writeDb && upsertSongVersionFile && dst) {
-          try {
-            const parsed = parseFilename(path.basename(filePath));
-            const meta = metaForDbFromParsed(parsed);
-            const relativePath = storagePathFromDst(dst);
-
-            await upsertSongVersionFile({
-              meta,
-              relativePath,
-              defaultLanguageCode: "vi",
-            });
-
-            console.log(`🗄️  upserted metadata: ${path.basename(dst)}`);
-          } catch (e) {
-            console.error(
-              `❌ DB upsert failed (will NOT block ingestion): ${path.basename(dst || filePath)} ->`,
-              e?.message || e
-            );
-          }
-        }
-
-        // Delete incoming file
-        safeUnlink(filePath);
-        console.log(`✅ promoted+deleted incoming: ${path.basename(filePath)}`);
-
-        // Cleanup + prune
-        postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
-        return;
-      }
-
-      if (status === "exists" && dst) {
-        // If exists, we only delete incoming if same inode
-        try {
-          const a = fs.statSync(filePath);
-          const b = fs.statSync(dst);
-
-          if (a.ino === b.ino) {
-            safeUnlink(filePath);
-            console.log(`↩️  already promoted; deleted incoming: ${path.basename(filePath)}`);
-
-            postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
-          } else {
-            // canonical exists but different inode
-            // This can happen when MeTube redownloads same title.
-            // Since canonical already exists, keep Incoming for manual inspection OR delete:
-            // Here we choose to delete ONLY if incoming filename matches canonical basename exactly.
-            const incomingBase = path.basename(filePath);
-            const dstBase = path.basename(dst);
-
-            if (incomingBase === dstBase) {
-              // same logical title -> delete incoming duplicate
-              safeUnlink(filePath);
-              console.log(`🧹 deleted incoming duplicate (canonical exists): ${incomingBase}`);
-              postDeleteCleanup(parentDir, watchedDirs, dirWatchers);
-            } else {
-              console.log(
-                `⚠️  canonical exists but inode differs; NOT deleting incoming: ${incomingBase}`
-              );
-              console.log(`    incoming: ${filePath}`);
-              console.log(`    canonical: ${dst}`);
-            }
-          }
-        } catch (e) {
-          console.error(
-            `❌ inode check failed; NOT deleting incoming: ${path.basename(filePath)} ->`,
-            e?.code || "",
-            e?.message || e
-          );
-        }
-        return;
-      }
-
-      console.log(`⏭️  skipped: ${path.basename(filePath)}`);
-    } catch (e) {
-      console.error(`❌ promote failed: ${path.basename(filePath)} ->`, e?.code || "", e?.message || e);
-    }
+    // Add to queue instead of processing immediately
+    processingQueue.push({ filePath, watchedDirs, dirWatchers });
+    processNextInQueue();
   }, 2000);
 
   pending.set(filePath, t);

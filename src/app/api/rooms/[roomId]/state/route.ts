@@ -65,9 +65,14 @@ export async function GET(
         .select(`
           *,
           kara_versions!version_id (
-            *,
-            kara_songs!song_id (*),
-            kara_files!version_id (storage_path, type)
+            id,
+            title_display,
+            tone,
+            mixer,
+            style,
+            artist_name,
+            performance_type,
+            kara_files!version_id (storage_path, type, duration_seconds)
           ),
           kara_users!user_id (*)
         `)
@@ -77,7 +82,6 @@ export async function GET(
       
       if (data) {
         const version = data.kara_versions || null;
-        const song = version?.kara_songs || null;
         const files = version?.kara_files || [];
         
         // Construct media_url from kara_files
@@ -92,14 +96,23 @@ export async function GET(
           media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
         }
         
-        // Map for backward compatibility
+        // Map to legacy Song format for backward compatibility
+        const song = version ? {
+          id: version.id,
+          title: version.title_display,
+          artist: version.artist_name || null,
+          language: 'vi', // Default language
+          youtube_id: null,
+          file_path: videoFile?.storage_path || '',
+          duration: videoFile?.duration_seconds || null,
+          created_at: data.added_at,
+          media_url
+        } : null;
+        
         currentSong = {
           ...data,
           version,
-          song: song ? {
-            ...song,
-            media_url
-          } : null,
+          song,
           user: data.kara_users || null
         } as QueueItem;
       }
@@ -113,9 +126,14 @@ export async function GET(
       .select(`
         *,
         kara_versions!version_id (
-          *,
-          kara_songs!song_id (*),
-          kara_files!version_id (storage_path, type)
+          id,
+          title_display,
+          tone,
+          mixer,
+          style,
+          artist_name,
+          performance_type,
+          kara_files!version_id (storage_path, type, duration_seconds)
         ),
         kara_users!user_id (*)
       `)
@@ -145,7 +163,6 @@ export async function GET(
       firstItem: queueData?.[0] ? {
         id: queueData[0].id,
         version: queueData[0].kara_versions,
-        song: queueData[0].kara_versions?.kara_songs,
         files: queueData[0].kara_versions?.kara_files
       } : null
     });
@@ -153,7 +170,6 @@ export async function GET(
     // Map queue items for backward compatibility
     const queue = (queueData || []).map(item => {
       const version = item.kara_versions || null;
-      const song = version?.kara_songs || null;
       const files = version?.kara_files || [];
       
       // Construct media_url from kara_files
@@ -168,13 +184,23 @@ export async function GET(
         media_url = `${config.mediaServer.baseUrl}/${encodeURIComponent(basename)}`;
       }
       
+      // Map to legacy Song format
+      const song = version ? {
+        id: version.id,
+        title: version.title_display,
+        artist: version.artist_name || null,
+        language: 'vi',
+        youtube_id: null,
+        file_path: videoFile?.storage_path || '',
+        duration: videoFile?.duration_seconds || null,
+        created_at: item.added_at,
+        media_url
+      } : null;
+      
       return {
         ...item,
         version,
-        song: song ? {
-          ...song,
-          media_url
-        } : null,
+        song,
         user: item.kara_users || null
       };
     }) as QueueItem[];

@@ -226,8 +226,8 @@ export const api = {
     if (!res.ok) throw new Error('Failed to skip song');
   },
 
-  async removeFromQueue(queueItemId: string, roomId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}?room_id=${roomId}`, {
+  async removeFromQueue(queueItemId: string, roomId: string, userId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}?room_id=${roomId}&user_id=${userId}`, {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to remove from queue');

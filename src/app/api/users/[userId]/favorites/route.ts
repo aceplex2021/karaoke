@@ -31,18 +31,26 @@ export async function GET(
       return NextResponse.json({ favorites: [] });
     }
 
-    // Fetch song details for favorite songs
-    const { data: songs, error: songsError } = await supabaseAdmin
-      .from('kara_songs')
-      .select('*')
+    // Fetch version details for favorites (treating IDs as version_ids)
+    const { data: versions, error: versionsError } = await supabaseAdmin
+      .from('kara_versions')
+      .select(`
+        id,
+        title_display,
+        tone,
+        mixer,
+        style,
+        artist_name,
+        performance_type
+      `)
       .in('id', favoriteSongIds);
 
-    if (songsError) {
-      console.error('[GET favorites] Error fetching songs:', songsError);
-      return NextResponse.json({ error: 'Failed to fetch favorite songs' }, { status: 500 });
+    if (versionsError) {
+      console.error('[GET favorites] Error fetching versions:', versionsError);
+      return NextResponse.json({ error: 'Failed to fetch favorite versions' }, { status: 500 });
     }
 
-    return NextResponse.json({ favorites: songs || [] });
+    return NextResponse.json({ favorites: versions || [] });
   } catch (error) {
     console.error('[GET favorites] Unexpected error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

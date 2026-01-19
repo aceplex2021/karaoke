@@ -1,156 +1,248 @@
-# Quick Deployment Checklist
-
-## ⚡ TL;DR
-
-**DON'T:** Copy entire `/Controller` folder ❌  
-**DO:** Copy only 7 specific files ✅
+# 🚀 Node Controller Deployment Checklist
+**Date:** 2026-01-18  
+**Purpose:** Deploy updated Node Controller for DB Revamp
 
 ---
 
-## 🎯 Quick Start (5 Minutes)
+## 📋 Files to Deploy
 
-### Step 1: Prepare Files (Windows)
+### **Updated Files (copy to TrueNAS):**
+
+1. ✅ **parseFilename-enhanced.js** → `parseFilename.js`
+   - Fixed nam/nu token bug
+   - Returns all metadata fields
+
+2. ✅ **dbUpsert-revamped.js** → `dbUpsert.js`
+   - Writes to new simplified schema
+   - No more kara_songs table
+   - Writes ALL metadata to kara_versions
+
+3. ✅ **watchVideos.js**
+   - Updated metaForDbFromParsed()
+   - Passes all parser fields to dbUpsert
+
+4. ✅ **rules-enhanced.js** → `rules.js`
+   - Dynamically loads from channelSources.md
+   - Already deployed (no changes needed)
+
+5. ✅ **channelSources.md**
+   - Mixer/channel names list
+   - Already deployed (no changes needed)
+
+---
+
+## 🔧 Deployment Steps
+
+### **Step 1: Backup Current Files**
+```bash
+ssh root@truenas
+cd /mnt/HomeServer/Media/Music/Karaoke/Controller
+
+# Create timestamped backup
+BACKUP_DIR="controller-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "../$BACKUP_DIR"
+cp parseFilename.js dbUpsert.js watchVideos.js "../$BACKUP_DIR/"
+
+echo "✅ Backup created in ../$BACKUP_DIR"
+```
+
+### **Step 2: Copy New Files from Windows**
+
+From **Windows** (PowerShell):
 ```powershell
-cd c:\Users\aceon\AI\karaoke\Controller
-.\prepare-production-files.ps1
+# Navigate to project directory
+cd C:\Users\aceon\AI\karaoke\Controller
+
+# Copy to TrueNAS (replace these with your actual commands)
+scp parseFilename-enhanced.js root@truenas:/mnt/HomeServer/Media/Music/Karaoke/Controller/parseFilename.js
+scp dbUpsert-revamped.js root@truenas:/mnt/HomeServer/Media/Music/Karaoke/Controller/dbUpsert.js
+scp watchVideos.js root@truenas:/mnt/HomeServer/Media/Music/Karaoke/Controller/watchVideos.js
 ```
 
-This creates `c:\temp\controller-update\` with 7 files ready to deploy.
+Or manually via Windows file share if you prefer.
 
-### Step 2: Backup TrueNAS Controller
+### **Step 3: Verify Files on TrueNAS**
 ```bash
-# SSH into TrueNAS
-ssh your-truenas-server
+ssh root@truenas
+cd /mnt/HomeServer/Media/Music/Karaoke/Controller
 
-# Backup (change path to match your setup)
-cp -r /mnt/pool/karaoke-node /mnt/pool/karaoke-node-backup-$(date +%Y%m%d)
+# Check files were copied
+ls -lh parseFilename.js dbUpsert.js watchVideos.js
+
+# Verify parseFilename.js has the nam/nu fix
+grep -n "isToneContext" parseFilename.js | head -3
+
+# Expected: Should show the new isToneContext logic
 ```
 
-### Step 3: Upload 7 Files
-Upload ALL files from `c:\temp\controller-update\` to your TrueNAS controller directory.
-
-**Files you're uploading:**
-1. ✅ `rules-enhanced.js` (NEW)
-2. ✅ `parseFilename-enhanced.js` (NEW)
-3. ✅ `dbUpsert-enhanced.js` (NEW)
-4. ✅ `channelSources.md` (NEW)
-5. ✅ `index.js` (REPLACE)
-6. ✅ `promoteIncoming.js` (REPLACE)
-7. ✅ `watchVideos.js` (REPLACE)
-
-### Step 4: Restart Controller
+### **Step 4: Restart Node Controller**
 ```bash
-# If using Docker
-docker restart karaoke-node
+# Restart Docker container
+docker restart ix-karaoke-node-karaoke-node-1
 
-# Watch logs
-docker logs -f karaoke-node
+# Wait for startup
+sleep 5
+
+# Check if running
+docker ps | grep karaoke
+
+# Expected: Should show "Up X seconds"
 ```
 
-### Step 5: Test
-Drop a test video into your incoming folder and watch it get processed.
-
----
-
-## 📋 Verification Checklist
-
-After deployment, verify:
-
-- [ ] No import errors in logs
-- [ ] Controller starts successfully
-- [ ] Test video gets processed
-- [ ] Database shows `artist_name` populated
-- [ ] Database shows `performance_type` (solo/duet/medley)
-- [ ] Mixer/channel detected correctly
-
----
-
-## 🔄 What Changed?
-
-| Feature | Before | After |
-|---------|--------|-------|
-| **Artist Detection** | ❌ Not extracted | ✅ Extracted from filename |
-| **Performance Type** | ❌ Always "solo" | ✅ Detected (solo/duet/medley/group) |
-| **Title Cleanup** | ⚠️ Basic | ✅ Advanced (removes noise, styles, etc.) |
-| **Mixer Names** | ⚠️ Hardcoded in code | ✅ Dynamic from channelSources.md |
-| **Tone Detection** | ✅ Working | ✅ Improved (handles Vietnamese) |
-| **Channel Detection** | ❌ Not working | ✅ Works with accents |
-
----
-
-## 🆘 Troubleshooting
-
-### Issue: Import errors
-**Cause:** Files not uploaded correctly  
-**Fix:** Verify all 7 files exist in controller directory
-
-### Issue: Mixer names not detected
-**Cause:** `channelSources.md` missing  
-**Fix:** Upload `channelSources.md`
-
-### Issue: Database errors
-**Cause:** Schema missing columns  
-**Fix:** Run `node check-schema.js` (already in your Controller folder)
-
-### Issue: Everything broken
-**Fix:** Restore from backup:
+### **Step 5: Monitor Logs**
 ```bash
-rm -rf /mnt/pool/karaoke-node
-cp -r /mnt/pool/karaoke-node-backup-YYYYMMDD /mnt/pool/karaoke-node
-docker restart karaoke-node
+# Watch logs for errors
+docker logs -f ix-karaoke-node-karaoke-node-1
+
+# Expected output:
+# 🧠 Supabase upsert enabled (WRITE_DB=true)
+# 📂 watching: /karaoke/Videos/Incoming
+
+# Press Ctrl+C to stop watching
 ```
 
 ---
 
-## 📝 Post-Deployment
+## ✅ Verification
 
-### Adding New Mixers
-1. SSH into TrueNAS
-2. Edit `channelSources.md`:
-   ```bash
-   nano /path/to/controller/channelSources.md
-   ```
-3. Add new name (one per line, use Vietnamese accents)
-4. Save and restart controller
+### **Check 1: No Errors on Startup**
+```bash
+docker logs --tail 50 ix-karaoke-node-karaoke-node-1 | grep -i error
 
-### Monitoring
-Check a few videos after deployment:
+# Expected: No "ERR_MODULE_NOT_FOUND" or similar errors
+```
+
+### **Check 2: Environment Correct**
+```bash
+docker exec ix-karaoke-node-karaoke-node-1 cat /app/.env | grep WRITE_DB
+
+# Expected: WRITE_DB=true
+```
+
+### **Check 3: Files Exist in Container**
+```bash
+docker exec ix-karaoke-node-karaoke-node-1 ls -la /app/parseFilename.js /app/dbUpsert.js /app/watchVideos.js
+
+# Expected: All 3 files exist with recent timestamps
+```
+
+---
+
+## 🧪 Test Write (Before Full Re-scan)
+
+**Test with 1 file first!**
+
+### **Step 1: Prepare Test File**
+```bash
+ssh root@truenas
+cd /mnt/HomeServer/Media/Music/Karaoke/Videos
+
+# Copy ONE file to /Incoming for testing
+cp "$(ls *.mp4 | head -1)" Incoming/
+
+# Note the filename
+ls Incoming/
+```
+
+### **Step 2: Watch Processing**
+```bash
+docker logs -f ix-karaoke-node-karaoke-node-1
+
+# Expected output:
+# 🗄️  upserted metadata: Test_Song__nam.mp4
+# ✅ promoted+deleted incoming: Test_Song__nam.mp4
+```
+
+### **Step 3: Verify Database**
+
+In **Supabase SQL Editor**:
 ```sql
+-- Check if version was created with all metadata
 SELECT 
   title_display,
+  tone,
+  mixer,
+  style,
   artist_name,
   performance_type,
-  created_at
-FROM kara_songs
-WHERE created_at > NOW() - INTERVAL '1 hour'
-ORDER BY created_at DESC;
+  label,
+  key
+FROM kara_versions
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- Expected: Should show the test file with all metadata populated
+```
+
+### **Step 4: Check File Record**
+```sql
+-- Check if file was linked to version
+SELECT 
+  v.title_display,
+  v.tone,
+  v.mixer,
+  f.storage_path
+FROM kara_files f
+JOIN kara_versions v ON v.id = f.version_id
+ORDER BY f.created_at DESC
+LIMIT 1;
+
+-- Expected: Should show file with storage_path and version metadata
 ```
 
 ---
 
-## ✅ Success Criteria
+## ⚠️ Troubleshooting
 
-You'll know it's working when:
-1. ✅ Controller starts without errors
-2. ✅ New videos show artist names in database
-3. ✅ Performance type is correctly detected (not always "solo")
-4. ✅ Titles are cleaner (no "Karaoke", "Tone Nam", etc.)
-5. ✅ Channel/mixer appears in metadata
+### **Error: Module Not Found**
+```bash
+# Check imports in dbUpsert.js
+docker exec ix-karaoke-node-karaoke-node-1 head -10 /app/dbUpsert.js
 
----
-
-## 📚 Documentation
-
-- **Full Guide:** `INTEGRATION_GUIDE.md`
-- **Channel Management:** `CHANNEL_SOURCES_GUIDE.md`
-- **Implementation Details:** `DYNAMIC_MIXER_LOADING.md`
-- **Database Review:** `DBUPSERT_REVIEW.md`
-
----
-
-**Ready? Run the PowerShell script to get started! 🚀**
-
-```powershell
-cd c:\Users\aceon\AI\karaoke\Controller
-.\prepare-production-files.ps1
+# Verify supabase.js and titleCase.js exist
+docker exec ix-karaoke-node-karaoke-node-1 ls -la /app/supabase.js /app/titleCase.js
 ```
+
+### **Error: Column Does Not Exist**
+```bash
+# Verify migration ran successfully
+# Run verification queries from EXECUTE_DB_REVAMP_NUCLEAR.sql
+```
+
+### **Error: Write Failed**
+```bash
+# Check WRITE_DB environment variable
+docker exec ix-karaoke-node-karaoke-node-1 printenv | grep WRITE_DB
+
+# Check Supabase credentials
+docker exec ix-karaoke-node-karaoke-node-1 printenv | grep SUPABASE
+```
+
+---
+
+## 📊 Success Criteria
+
+After deployment:
+- ✅ Docker container running (not restarting)
+- ✅ No errors in logs
+- ✅ Test file processed successfully
+- ✅ Database shows version with all metadata (tone, mixer, style, artist)
+- ✅ File linked to version correctly
+
+**If all checks pass, proceed to full re-scan!**
+
+---
+
+## 🎯 Next: Full Re-scan
+
+Once test passes:
+```bash
+# Move ALL files to /Incoming
+cd /mnt/HomeServer/Media/Music/Karaoke/Videos
+ls *.mp4 | xargs -I {} mv {} Incoming/
+
+# Monitor progress
+docker logs -f ix-karaoke-node-karaoke-node-1
+```
+
+**Estimated time:** 30 minutes - 2 hours (depending on number of files)

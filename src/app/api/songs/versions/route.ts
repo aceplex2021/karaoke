@@ -7,24 +7,28 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Build play URL from storage_path
+ * Strip /Videos/ prefix since media server base URL already points to videos directory
  */
 function buildPlayUrl(storagePath: string): string {
-  const encoded = encodeURIComponent(storagePath);
+  // Remove /Videos/ or Videos/ prefix if present
+  let cleanPath = storagePath.replace(/^\/Videos\//i, '').replace(/^Videos\//i, '');
+  
+  // Encode only the filename (not the whole path)
+  const encoded = encodeURIComponent(cleanPath);
   return `${config.mediaServer.baseUrl}/${encoded}`;
 }
 
 /**
- * Get versions for a song by title_clean
- * Uses kara_song_versions_detail_view (authoritative source)
- * Returns versions with tone, mixer, style for display
+ * Get versions for a song by group_id or title_clean (updated for new schema)
+ * Returns versions with complete metadata from kara_versions table
  */
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const groupId = searchParams.get('group_id');
-    const titleClean = searchParams.get('title_clean'); // Keep for backward compatibility
+    const titleClean = searchParams.get('title_clean'); // Backward compatibility
 
-    // Prefer group_id, fallback to title_clean for backward compatibility
+    // Prefer group_id, fallback to title_clean
     if (!groupId && (!titleClean || !titleClean.trim())) {
       return NextResponse.json(
         { error: 'group_id or title_clean parameter is required' },
@@ -38,11 +42,32 @@ export async function GET(request: NextRequest) {
     let error: any = null;
 
     if (groupId) {
-      // Query by group_id (preferred method - unambiguous)
+      // Query by group_id (preferred method)
       const result = await supabaseAdmin
-        .from('kara_song_versions_detail_view')
-        .select('id, version_id, group_id, song_title, tone, mixer, style, artist, storage_path')
+        .from('kara_versions')
+        .select(`
+          id,
+          group_id,
+          title_display,
+          tone,
+          mixer,
+          style,
+          artist_name,
+          performance_type,
+          key,
+          tempo,
+          label,
+          is_default,
+          kara_files!inner (
+            id,
+            storage_path,
+            duration_seconds,
+            type
+          )
+        `)
         .eq('group_id', groupId)
+        .eq('kara_files.type', 'video')
+        .order('is_default', { ascending: false })
         .order('tone', { ascending: true, nullsFirst: false })
         .order('mixer', { ascending: true, nullsFirst: false })
         .order('style', { ascending: true, nullsFirst: false });
@@ -52,24 +77,35 @@ export async function GET(request: NextRequest) {
     } else if (titleClean) {
       // Fallback: Query by title_clean (backward compatibility)
       const result = await supabaseAdmin
-        .from('kara_song_versions_detail_view')
-        .select('id, version_id, group_id, song_title, tone, mixer, style, artist, storage_path')
-        .not('song_title', 'is', null)  // Exclude medleys (NULL song_title)
-        .ilike('song_title', `${titleClean}%`)  // Match titles that start with search title
-        .order('tone', { ascending: true, nullsFirst: false })
-        .order('mixer', { ascending: true, nullsFirst: false })
-        .order('style', { ascending: true, nullsFirst: false });
+        .from('kara_versions')
+        .select(`
+          id,
+          group_id,
+          title_display,
+          title_clean,
+          tone,
+          mixer,
+          style,
+          artist_name,
+          performance_type,
+          key,
+          tempo,
+          label,
+          is_default,
+          kara_files!inner (
+            id,
+            storage_path,
+            duration_seconds,
+            type
+          )
+        `)
+        .ilike('title_clean', titleClean)
+        .eq('kara_files.type', 'video')
+        .order('is_default', { ascending: false })
+        .order('tone', { ascending: true, nullsFirst: false });
       
       versions = result.data || [];
       error = result.error;
-
-      // Filter to exact match (case-insensitive)
-      const titleCleanLower = titleClean.toLowerCase().trim();
-      versions = versions.filter((v: any) => {
-        if (!v.song_title) return false;
-        const songTitleLower = v.song_title.toLowerCase().trim();
-        return songTitleLower === titleCleanLower;
-      });
     }
 
     if (error) {
@@ -77,16 +113,7 @@ export async function GET(request: NextRequest) {
       throw new Error(`Failed to fetch versions: ${error.message}`);
     }
 
-    const matchingVersions = versions;
-
-    console.log('[versions] Query result:', {
-      total_versions: matchingVersions.length,
-      group_id: groupId,
-      title_clean: titleClean,
-      sample_match: matchingVersions[0] || null,
-    });
-
-    if (matchingVersions.length === 0) {
+    if (!versions || versions.length === 0) {
       console.log('[versions] No versions found:', { group_id: groupId, title_clean: titleClean });
       
       return NextResponse.json({
@@ -96,41 +123,33 @@ export async function GET(request: NextRequest) {
       });
     }
     
-    console.log('[versions] Found', matchingVersions.length, 'versions:', { group_id: groupId, title_clean: titleClean });
+    console.log('[versions] Found', versions.length, 'versions:', { group_id: groupId, title_clean: titleClean });
 
-    // Group by version_id - one version can have multiple files
-    // We want to show one row per version, not one row per file
-    const versionsByVersionId = new Map<string, any>();
-    
-    matchingVersions.forEach((v: any) => {
-      const versionId = v.version_id;
-      if (!versionsByVersionId.has(versionId)) {
-        // First file for this version - use it
-        versionsByVersionId.set(versionId, v);
-      }
-      // If multiple files exist for same version, we keep the first one
-      // (could enhance later to pick "best" file based on quality/duration)
-    });
-
-    // Format versions - one per version_id
-    const formattedVersions = Array.from(versionsByVersionId.values()).map((v: any) => {
+    // Format versions
+    const formattedVersions = versions.map((v: any) => {
+      const file = Array.isArray(v.kara_files) ? v.kara_files[0] : v.kara_files;
+      
       return {
-        version_id: v.version_id, // kara_versions.id (required for kara_queue)
-        file_id: v.id, // kara_files.id (for unique identification)
+        version_id: v.id,
+        file_id: file.id,
         tone: v.tone || null,
         mixer: v.mixer || null,
         style: v.style || null,
-        artist: v.artist || null,
+        artist: v.artist_name || null,
+        performance_type: v.performance_type || 'solo',
+        pitch: v.key || null,
+        tempo: v.tempo || null,
+        is_default: v.is_default || false,
         file: {
-          file_id: v.id,
-          storage_path: v.storage_path || null,
-          play_url: v.storage_path ? buildPlayUrl(v.storage_path) : null,
-          duration_s: null,
+          file_id: file.id,
+          storage_path: file.storage_path || null,
+          play_url: file.storage_path ? buildPlayUrl(file.storage_path) : null,
+          duration_s: file.duration_seconds || null,
         },
       };
     });
 
-    console.log(`[versions] Found ${formattedVersions.length} unique versions (from ${matchingVersions.length} files):`, { group_id: groupId, title_clean: titleClean });
+    console.log(`[versions] Returning ${formattedVersions.length} formatted versions`);
 
     return NextResponse.json({
       group_id: groupId || null,

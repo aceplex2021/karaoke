@@ -139,9 +139,28 @@ export interface SongHistory {
   id: string;
   room_id: string;
   user_id: string;
-  song_id: string;
+  version_id: string;  // Changed from song_id to version_id
   sung_at: string;
   times_sung: number;
+  // Added by API for backward compatibility
+  version?: {
+    id: string;
+    title_display: string;
+    tone?: string;
+    mixer?: string;
+    style?: string;
+    artist_name?: string;
+    performance_type?: string;
+  };
+  song?: {
+    id: string;
+    title: string;
+    artist: string;
+    tone?: string;
+    mixer?: string;
+    style?: string;
+    performance_type?: string;
+  };
 }
 
 export interface RoomParticipant {
