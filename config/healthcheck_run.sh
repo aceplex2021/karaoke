@@ -93,4 +93,12 @@ if [ -n "${MISSING:-}" ]; then
     echo "- missing_on_disk detected: $MNUM" >> "$LOG_FILE"
     echo "  Suggested fix: inspect sample IDs; resolve path normalization or delete stale rows." >> "$LOG_FILE"
   else
-    echo "- missing_on_disk is 0. ✅" >> "$LOG_FI_
+    echo "- missing_on_disk is 0. ✅" >> "$LOG_FILE"
+  fi
+else
+  echo "- Could not parse missing_on_disk (inspect raw output above)." >> "$LOG_FILE"
+fi
+
+echo "" >> "$LOG_FILE"
+echo "🎤 HEALTHCHECK END    $(ts)" >> "$LOG_FILE"
+echo "============================================================" >> "$LOG_FILE"
