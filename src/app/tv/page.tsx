@@ -108,19 +108,24 @@ function TVModePageContent() {
 
   // Auto-hide sidebar after 10 seconds of inactivity
   useEffect(() => {
+    console.log('[tv] Sidebar state changed:', showSidebar);
     if (showSidebar) {
       // Clear any existing timer
       if (sidebarTimerRef.current) {
+        console.log('[tv] Clearing existing sidebar timer');
         clearTimeout(sidebarTimerRef.current);
       }
       
       // Set new timer for 10 seconds
+      console.log('[tv] Setting 10-second auto-hide timer');
       sidebarTimerRef.current = setTimeout(() => {
+        console.log('[tv] Auto-hide timer fired - closing sidebar');
         setShowSidebar(false);
       }, 10000);
     } else {
       // Clear timer when sidebar is closed
       if (sidebarTimerRef.current) {
+        console.log('[tv] Sidebar closed manually - clearing timer');
         clearTimeout(sidebarTimerRef.current);
         sidebarTimerRef.current = null;
       }
@@ -129,6 +134,7 @@ function TVModePageContent() {
     // Cleanup on unmount
     return () => {
       if (sidebarTimerRef.current) {
+        console.log('[tv] Cleaning up sidebar timer on unmount');
         clearTimeout(sidebarTimerRef.current);
       }
     };
