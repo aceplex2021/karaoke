@@ -108,24 +108,29 @@ function TVModePageContent() {
 
   // Auto-hide sidebar after 10 seconds of inactivity
   useEffect(() => {
-    console.log('[tv] Sidebar state changed:', showSidebar);
+    // Only run on client-side
+    if (typeof window === 'undefined') return;
+    
+    console.log('[tv] Sidebar state changed:', showSidebar, 'Timer ref:', sidebarTimerRef.current);
     if (showSidebar) {
       // Clear any existing timer
       if (sidebarTimerRef.current) {
-        console.log('[tv] Clearing existing sidebar timer');
+        console.log('[tv] Clearing existing sidebar timer:', sidebarTimerRef.current);
         clearTimeout(sidebarTimerRef.current);
       }
       
       // Set new timer for 10 seconds
-      console.log('[tv] Setting 10-second auto-hide timer');
-      sidebarTimerRef.current = setTimeout(() => {
-        console.log('[tv] Auto-hide timer fired - closing sidebar');
+      console.log('[tv] Setting 10-second auto-hide timer at', new Date().toISOString());
+      const timerId = setTimeout(() => {
+        console.log('[tv] Auto-hide timer fired - closing sidebar at', new Date().toISOString());
         setShowSidebar(false);
       }, 10000);
+      sidebarTimerRef.current = timerId;
+      console.log('[tv] Timer ID stored:', timerId);
     } else {
       // Clear timer when sidebar is closed
       if (sidebarTimerRef.current) {
-        console.log('[tv] Sidebar closed manually - clearing timer');
+        console.log('[tv] Sidebar closed manually - clearing timer:', sidebarTimerRef.current);
         clearTimeout(sidebarTimerRef.current);
         sidebarTimerRef.current = null;
       }
@@ -134,7 +139,7 @@ function TVModePageContent() {
     // Cleanup on unmount
     return () => {
       if (sidebarTimerRef.current) {
-        console.log('[tv] Cleaning up sidebar timer on unmount');
+        console.log('[tv] Cleaning up sidebar timer on unmount:', sidebarTimerRef.current);
         clearTimeout(sidebarTimerRef.current);
       }
     };
