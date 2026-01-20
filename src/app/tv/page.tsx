@@ -67,6 +67,7 @@ function TVModePageContent() {
   const roomRef = useRef<Room | null>(null);
   const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
   const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
+  const sidebarTimerRef = useRef<NodeJS.Timeout | null>(null); // Auto-hide sidebar timer
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -104,6 +105,34 @@ function TVModePageContent() {
       }
     };
   }, [roomIdParam]);
+
+  // Auto-hide sidebar after 10 seconds of inactivity
+  useEffect(() => {
+    if (showSidebar) {
+      // Clear any existing timer
+      if (sidebarTimerRef.current) {
+        clearTimeout(sidebarTimerRef.current);
+      }
+      
+      // Set new timer for 10 seconds
+      sidebarTimerRef.current = setTimeout(() => {
+        setShowSidebar(false);
+      }, 10000);
+    } else {
+      // Clear timer when sidebar is closed
+      if (sidebarTimerRef.current) {
+        clearTimeout(sidebarTimerRef.current);
+        sidebarTimerRef.current = null;
+      }
+    }
+    
+    // Cleanup on unmount
+    return () => {
+      if (sidebarTimerRef.current) {
+        clearTimeout(sidebarTimerRef.current);
+      }
+    };
+  }, [showSidebar]);
 
   /**
    * Deterministic refresh function (canonical HTTP fetch)
