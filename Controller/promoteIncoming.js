@@ -18,6 +18,84 @@ function isVideoFile(p) {
 // --------------------
 // filename normalization
 // --------------------
+
+// Linux ext4 / most FS max filename bytes is 255.
+// Use a safe margin because UTF-8 Vietnamese chars can take multiple bytes.
+// Also leave room for suffix + extension.
+const MAX_FILENAME_BYTES = 240;
+
+// Collapse repeated "__Nam_Nhạc Sống" / "__Nữ_Nhạc Sống" garbage in titles
+// and remove trailing "__<9 hex>" that comes from legacy renames.
+function sanitizeBaseName(nameNoExt) {
+  let s = String(nameNoExt || "");
+
+  // Normalize whitespace
+  s = s.replace(/\s+/g, " ").trim();
+
+  // If somebody embedded extension in the title text, remove it here (safety)
+  s = s.replace(/\.(mp4|mkv|webm|m4v)$/i, "");
+
+  // Remove any trailing hash-like suffix: "__ca2071e9d" (9 hex) or "__c6014b420" etc.
+  // You asked specifically __<9 hex char>
+  s = s.replace(/__([a-f0-9]{9})$/i, "");
+
+  // Also remove longer pure-hex suffixes that show up (defensive)
+  s = s.replace(/__([a-f0-9]{8,32})$/i, "");
+
+  // Collapse repeated __Nam_Nhạc Sống or __Nữ_Nhạc Sống
+  // Example: "__Nam_Nhạc Sống__Nam_Nhạc Sống__Nam_Nhạc Sống" -> "__Nam_Nhạc Sống"
+  // Do it for both accented and non-accent variants (best effort).
+  const repeatPattern = /__(Nam|Nữ|Nu|NU|Nu)\s*_?\s*(Nhạc\s*Sống|Nhac\s*Song)/gi;
+  // Convert any variants to a canonical token so we can dedupe
+  // We will dedupe by splitting on "__" later too.
+  s = s.replace(repeatPattern, (m) => {
+    // Preserve original case minimally; keep Vietnamese accented "Nhạc Sống" in output
+    const tone = /nữ|nu/i.test(m) ? "Nữ" : "Nam";
+    return `__${tone}_Nhạc Sống`;
+  });
+
+  // Now dedupe repeated "__..." chunks, keeping order.
+  // This avoids titles ballooning from repeated tokens.
+  // Only dedupe the "__<token>" fragments, not the main title text.
+  const pieces = s.split("__");
+  if (pieces.length > 1) {
+    const head = pieces[0].trim(); // title part before first "__"
+    const seen = new Set();
+    const tail = [];
+
+    for (let i = 1; i < pieces.length; i++) {
+      const token = pieces[i].trim();
+      if (!token) continue;
+
+      // Deduplicate exact token repeats
+      const key = token.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tail.push(token);
+    }
+
+    s = head + (tail.length ? `__${tail.join("__")}` : "");
+  }
+
+  // Trim again
+  s = s.replace(/\s+/g, " ").trim();
+
+  return s;
+}
+
+// Ensure filename byte-length <= limit (UTF-8 safe-ish using Buffer.byteLength).
+function trimToMaxBytes(str, maxBytes) {
+  let s = String(str || "");
+  if (Buffer.byteLength(s, "utf8") <= maxBytes) return s;
+
+  // Binary chop by characters until within limit
+  // (simple + safe; filenames are short enough)
+  while (s.length > 0 && Buffer.byteLength(s, "utf8") > maxBytes) {
+    s = s.slice(0, -1);
+  }
+  return s.trim();
+}
+
 function canonicalFilename(srcPath) {
   const base = path.basename(srcPath);
   const meta = parseFilename(base);
@@ -34,12 +112,29 @@ function canonicalFilename(srcPath) {
   if (meta?.style) parts.push(meta.style);
 
   const suffix = parts.length ? `__${parts.join("_")}` : "";
-  const safeTitle = String(title)
+
+  // 기존 safe title cleanup
+  let safeTitle = String(title)
     .replace(/[\/\\:*?"<>|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
+  // ✅ NEW: sanitize long/repeated garbage + trailing __<hash>
+  safeTitle = sanitizeBaseName(safeTitle);
+
+  // Build ext
   const ext = path.extname(srcPath) || ".mp4";
+
+  // ✅ NEW: enforce max filename bytes (safe margin for UTF-8)
+  // Budget includes suffix + ext
+  const budget = Math.max(50, MAX_FILENAME_BYTES - Buffer.byteLength(suffix + ext, "utf8"));
+  safeTitle = trimToMaxBytes(safeTitle, budget);
+
+  // If trimming made it empty, fall back to hash
+  if (!safeTitle) {
+    safeTitle = `untitled_${shortHashFromBasename(srcPath)}`;
+  }
+
   return `${safeTitle}${suffix}${ext}`;
 }
 

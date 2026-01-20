@@ -1,4 +1,4 @@
-// parseFilename.js
+// parseFilename-enhanced.js
 // Enhanced with title cleanup, artist extraction, performance type detection
 import removeAccents from 'remove-accents';
 import { 
@@ -374,7 +374,9 @@ export function parseFilename(filename, storagePath = '') {
   const original = filename;
 
   // Remove .mp4 extension
-  const base = filename.replace(/\.mp4$/i, '');
+  const base = filename
+    .replace(/\.mp4$/i, '')
+    .replace(/__[a-f0-9]{9}$/i, '');
 
   // STEP 1: Handle KARAOKE format: "KARAOKE | Song - Artist" or "ACV Karaoke | Song - Artist"
   let processedBase = base;
@@ -781,3 +783,4 @@ export function parseFilename(filename, storagePath = '') {
     channel: channel
   };
 }
+
