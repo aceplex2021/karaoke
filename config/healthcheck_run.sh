@@ -26,7 +26,7 @@ export SUPABASE_SERVICE_ROLE_KEY
 # -------------------------
 # Paths
 # -------------------------
-LOG_DIR="/mnt/HomeServer/Media/Music/Karaoke/logs"
+LOG_DIR="/mnt/HomeServer/Media/Music/Karaoke/Automation/logs"
 LOG_FILE="$LOG_DIR/healthcheck.log"
 
 CONTROLLER_HOST="/mnt/HomeServer/Media/Music/Karaoke/Controller"
