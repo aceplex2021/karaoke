@@ -1199,39 +1199,53 @@ function TVModePageContent() {
               Queue is empty
             </div>
           )}
-          
-          {/* Start Playing Button - shows when queue has songs but nothing playing */}
-          {!currentSong && queue.length > 0 && (
-            <button
-              onClick={async () => {
-                if (room) {
-                  try {
-                    await api.advancePlayback(room.id);
-                    console.log('[tv] Manual start triggered');
-                  } catch (err) {
-                    console.error('[tv] Failed to start playback:', err);
-                  }
-                }
-              }}
-              style={{
-                margin: '1rem auto',
-                padding: '1rem 2rem',
-                background: 'rgba(0, 255, 0, 0.3)',
-                border: '2px solid #00ff00',
-                borderRadius: '12px',
-                color: 'white',
-                fontSize: '1.2rem',
-                cursor: 'pointer',
-                display: 'block',
-                fontWeight: 'bold'
-              }}
-            >
-              ▶️ Start Playing
-            </button>
-          )}
         </div>
       </div>
 
+
+      {/* Start Playing Button - centered overlay when queue has songs but nothing playing */}
+      {!currentSong && queue.length > 0 && (
+        <button
+          onClick={async () => {
+            if (room) {
+              try {
+                await api.advancePlayback(room.id);
+                console.log('[tv] Manual start triggered');
+              } catch (err) {
+                console.error('[tv] Failed to start playback:', err);
+              }
+            }
+          }}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            padding: '2rem 3rem',
+            background: 'rgba(0, 255, 0, 0.3)',
+            border: '3px solid #00ff00',
+            borderRadius: '16px',
+            color: 'white',
+            fontSize: '2rem',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            zIndex: 1000,
+            boxShadow: '0 8px 32px rgba(0, 255, 0, 0.3)',
+            backdropFilter: 'blur(10px)',
+            transition: 'all 0.3s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(0, 255, 0, 0.5)';
+            e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1.05)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(0, 255, 0, 0.3)';
+            e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1)';
+          }}
+        >
+          ▶️ Start Playing
+        </button>
+      )}
 
       {/* Error Display */}
       {error && currentSong && (
