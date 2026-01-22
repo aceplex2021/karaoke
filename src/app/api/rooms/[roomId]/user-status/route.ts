@@ -3,10 +3,15 @@
  * GET /api/rooms/[roomId]/user-status?userId={userId}
  * 
  * Returns the user's participant status in the room
+ * v4.4.1: Fixed to use supabaseAdmin (no cache)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/server/lib/supabase';
+
+// v4.4.1: Disable Next.js caching - CRITICAL for real-time approval
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(
   request: NextRequest,
@@ -25,7 +30,7 @@ export async function GET(
     }
 
     // Get participant status
-    const { data: participant, error } = await supabase
+    const { data: participant, error } = await supabaseAdmin
       .from('kara_room_participants')
       .select('id, status, role, expires_at, approved_at, joined_at')
       .eq('room_id', roomId)
@@ -45,7 +50,7 @@ export async function GET(
       const expiresAt = new Date(participant.expires_at);
       if (expiresAt < new Date()) {
         // Auto-deny expired request
-        await supabase
+        await supabaseAdmin
           .from('kara_room_participants')
           .update({ status: 'denied' })
           .eq('id', participant.id);

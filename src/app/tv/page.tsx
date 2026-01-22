@@ -11,6 +11,7 @@ import type { Room, QueueItem } from '@/shared/types';
 import { YouTubePlayer } from '@/components/YouTubePlayer';
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
+import { supabase } from '@/lib/supabase'; // v4.4: Realtime sync
 
 /**
  * Format seconds to MM:SS or HH:MM:SS
@@ -51,6 +52,8 @@ function TVModePageContent() {
   const [tvUserId, setTvUserId] = useState<string | null>(null); // Host user ID from localStorage
   const [tvId, setTvId] = useState<string | null>(null); // Unique ID for this TV instance
   const [isPrimaryTV, setIsPrimaryTV] = useState(false); // Is this the primary TV (with audio)?
+  const [joinedMidSong, setJoinedMidSong] = useState(false); // v4.4: Did TV join while song was playing?
+  const [useRealtime, setUseRealtime] = useState(true); // v4.4: Use Realtime (fallback to polling if false)
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -75,6 +78,8 @@ function TVModePageContent() {
   const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
   const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
   const sidebarTimerRef = useRef<NodeJS.Timeout | null>(null); // Auto-hide sidebar timer
+  const realtimeChannelRef = useRef<any>(null); // v4.4: Supabase Realtime channel
+  const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -161,6 +166,12 @@ function TVModePageContent() {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
       }
+      // v4.4: Cleanup Realtime subscription
+      if (realtimeChannelRef.current) {
+        console.log('[tv] Cleaning up Realtime subscription');
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
     };
   }, [codeParam, roomIdParam]);
 
@@ -181,38 +192,44 @@ function TVModePageContent() {
     // Only run on client-side
     if (typeof window === 'undefined') return;
     
-    console.log('[tv] Sidebar state changed:', showSidebar, 'Timer ref:', sidebarTimerRef.current);
+    console.log('[tv] 🎯 Sidebar useEffect triggered - showSidebar:', showSidebar, 'Timer ref:', sidebarTimerRef.current);
+    
     if (showSidebar) {
       // Clear any existing timer
       if (sidebarTimerRef.current) {
-        console.log('[tv] Clearing existing sidebar timer:', sidebarTimerRef.current);
-        clearTimeout(sidebarTimerRef.current);
-      }
-      
-      // Set new timer for 10 seconds
-      console.log('[tv] Setting 10-second auto-hide timer at', new Date().toISOString());
-      const timerId = setTimeout(() => {
-        console.log('[tv] Auto-hide timer fired - closing sidebar at', new Date().toISOString());
-        setShowSidebar(false);
-      }, 10000);
-      sidebarTimerRef.current = timerId;
-      console.log('[tv] Timer ID stored:', timerId);
-    } else {
-      // Clear timer when sidebar is closed
-      if (sidebarTimerRef.current) {
-        console.log('[tv] Sidebar closed manually - clearing timer:', sidebarTimerRef.current);
+        console.log('[tv] 🧹 Clearing existing sidebar timer:', sidebarTimerRef.current);
         clearTimeout(sidebarTimerRef.current);
         sidebarTimerRef.current = null;
       }
-    }
-    
-    // Cleanup on unmount
-    return () => {
+      
+      // Set new timer for 10 seconds
+      console.log('[tv] ⏰ Setting 10-second auto-hide timer at', new Date().toISOString());
+      const timerId = setTimeout(() => {
+        console.log('[tv] 🔔 Auto-hide timer FIRED - closing sidebar at', new Date().toISOString());
+        setShowSidebar(false);
+      }, 10000);
+      sidebarTimerRef.current = timerId;
+      console.log('[tv] ✅ Timer ID stored:', timerId, 'Will fire at:', new Date(Date.now() + 10000).toISOString());
+      
+      return () => {
+        console.log('[tv] 🚫 Cleanup function called while sidebar was open - clearing timer:', sidebarTimerRef.current);
+        if (sidebarTimerRef.current) {
+          clearTimeout(sidebarTimerRef.current);
+          sidebarTimerRef.current = null;
+        }
+      };
+    } else {
+      // Clear timer when sidebar is closed
       if (sidebarTimerRef.current) {
-        console.log('[tv] Cleaning up sidebar timer on unmount:', sidebarTimerRef.current);
+        console.log('[tv] ✕ Sidebar closed manually - clearing timer:', sidebarTimerRef.current);
         clearTimeout(sidebarTimerRef.current);
+        sidebarTimerRef.current = null;
       }
-    };
+      
+      return () => {
+        console.log('[tv] 🚫 Cleanup function called while sidebar was closed');
+      };
+    }
   }, [showSidebar]);
 
   /**
@@ -237,6 +254,13 @@ function TVModePageContent() {
       // DETAILED DEBUG: Show full currentSong structure
       if (state.currentSong) {
         console.log('[tv] FULL currentSong:', JSON.stringify(state.currentSong, null, 2));
+      }
+      
+      // v4.4: Check if song changed (new song started) - clear mid-song flag
+      if (initialEntryIdRef.current && state.room.current_entry_id !== initialEntryIdRef.current) {
+        console.log('[tv] ✅ New song started - clearing mid-song flag');
+        setJoinedMidSong(false);
+        initialEntryIdRef.current = null;
       }
       
       // Only update if this is still the latest request
@@ -265,6 +289,66 @@ function TVModePageContent() {
    * Start polling room state
    * Polls refreshState every 2.5 seconds
    */
+  /**
+   * v4.4: Subscribe to Realtime updates for room changes
+   */
+  const subscribeToRoom = useCallback((roomId: string) => {
+    // Unsubscribe from previous channel if exists
+    if (realtimeChannelRef.current) {
+      console.log('[tv] Unsubscribing from previous Realtime channel');
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
+
+    console.log('[tv] Setting up Realtime subscription for room:', roomId);
+    
+    const channel = supabase
+      .channel(`room-${roomId}`)
+      // Subscribe to room changes (current_entry_id updates)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'kara_rooms',
+          filter: `id=eq.${roomId}`
+        },
+        (payload) => {
+          console.log('[tv] Realtime: Room updated', payload);
+          // Refresh state when room changes (especially current_entry_id)
+          refreshState(roomId);
+        }
+      )
+      // v4.4.1: Subscribe to queue changes (new songs added)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'kara_queue',
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          console.log('[tv] Realtime: Queue updated', payload.eventType, payload);
+          // Refresh state to get updated queue
+          refreshState(roomId);
+        }
+      )
+      .subscribe((status) => {
+        console.log('[tv] Realtime subscription status:', status);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('[tv] ✅ Realtime connected (room + queue)');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[tv] ❌ Realtime failed, falling back to polling');
+          setUseRealtime(false);
+          startPolling(roomId);
+        }
+      });
+    
+    realtimeChannelRef.current = channel;
+  }, [refreshState]);
+
   const startPolling = useCallback((roomId: string) => {
     // Don't start if already polling
     if (pollingIntervalRef.current) {
@@ -296,6 +380,7 @@ function TVModePageContent() {
       
       // Register as primary TV if no primary exists (v4.3)
       const currentTvId = localStorage.getItem('tv_id');
+      let isPrimary = false;
       if (currentTvId) {
         try {
           const response = await fetch(`/api/rooms/${roomId}/register-tv`, {
@@ -306,8 +391,9 @@ function TVModePageContent() {
           
           if (response.ok) {
             const data = await response.json();
-            setIsPrimaryTV(data.is_primary);
-            console.log('[tv] Registered as', data.is_primary ? 'PRIMARY' : 'SECONDARY', 'TV');
+            isPrimary = data.is_primary;
+            setIsPrimaryTV(isPrimary);
+            console.log('[tv] Registered as', isPrimary ? 'PRIMARY' : 'SECONDARY', 'TV');
           }
         } catch (err) {
           console.error('[tv] Failed to register TV:', err);
@@ -316,8 +402,26 @@ function TVModePageContent() {
         }
       }
       
-      // Start polling
-      startPolling(roomId);
+      // v4.4.1: Check if TV joined mid-song (ONLY for secondary TVs)
+      const initialState = await api.getRoomState(roomId);
+      if (!isPrimary && initialState.currentSong && initialState.room.current_entry_id) {
+        console.log('[tv] ⚠️ Secondary TV joined mid-song - will wait for next song');
+        setJoinedMidSong(true);
+        initialEntryIdRef.current = initialState.room.current_entry_id;
+      } else {
+        if (isPrimary && initialState.currentSong) {
+          console.log('[tv] ✅ Primary TV - playing current song immediately');
+        }
+        setJoinedMidSong(false);
+        initialEntryIdRef.current = null;
+      }
+      
+      // v4.4: Use Realtime subscription with polling fallback
+      if (useRealtime) {
+        subscribeToRoom(roomId);
+      } else {
+        startPolling(roomId);
+      }
       
       setLoading(false);
     } catch (err: any) {
@@ -671,8 +775,38 @@ function TVModePageContent() {
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
       {/* Video Container - Full screen */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
+        {/* v4.4: Mid-song connection message */}
+        {joinedMidSong && currentSong && (
+          <div style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            padding: '2rem',
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: '5rem', marginBottom: '2rem', animation: 'pulse 2s ease-in-out infinite' }}>
+              ⏸️
+            </div>
+            <h1 style={{ fontSize: '3rem', marginBottom: '1rem', fontWeight: 'bold' }}>
+              Display Connected
+            </h1>
+            <p style={{ fontSize: '1.5rem', opacity: 0.9, maxWidth: '800px', lineHeight: '1.6' }}>
+              Video will start playing when the next song begins
+            </p>
+            <div style={{ marginTop: '3rem', padding: '1.5rem 2rem', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '12px', fontSize: '1.2rem' }}>
+              <strong>Current song:</strong> {currentSong.song?.title || 'Unknown'}
+              {currentSong.song?.artist && <div style={{ marginTop: '0.5rem', opacity: 0.8 }}>{currentSong.song.artist}</div>}
+            </div>
+          </div>
+        )}
+        
         {/* YouTube Player (v4.0 Commercial Mode) */}
-        {isYouTubeSong && currentSong?.youtube_url && (
+        {!joinedMidSong && isYouTubeSong && currentSong?.youtube_url && (
           <YouTubePlayer
             key={currentSong.id}
             videoUrl={currentSong.youtube_url}
@@ -700,7 +834,7 @@ function TVModePageContent() {
         )}
         
         {/* HTML5 Video Player (v3.5 Database Mode) */}
-        {!isYouTubeSong && (
+        {!joinedMidSong && !isYouTubeSong && (
           <video
             key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
             ref={videoRef}

@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/server/lib/supabase';
 import { extractYouTubeId, isValidYouTubeUrl } from '@/lib/youtube';
 import { appConfig } from '@/lib/config';
 
@@ -77,9 +77,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if room exists and is active
-    const { data: room, error: roomError } = await supabase
+    const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
-      .select('id, is_active, approval_mode, queue_mode')
+      .select('id, is_active, approval_mode, queue_mode, current_entry_id')
       .eq('id', room_id)
       .single();
 
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     // Check user approval status (if approval mode enabled)
     if (room.approval_mode === 'approval') {
-      const { data: participant, error: participantError } = await supabase
+      const { data: participant, error: participantError } = await supabaseAdmin
         .from('kara_room_participants')
         .select('status')
         .eq('room_id', room_id)
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
       // Round-robin: Calculate fair position and round number
       
       // Get max round number
-      const { data: maxRoundData } = await supabase
+      const { data: maxRoundData } = await supabaseAdmin
         .from('kara_queue')
         .select('round_number')
         .eq('room_id', room_id)
@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
       // Find the first round (1 to maxRound+1) where this user doesn't have a song
       let foundRound = false;
       for (let round = 1; round <= maxRound + 1; round++) {
-        const { data: userInRound } = await supabase
+        const { data: userInRound } = await supabaseAdmin
           .from('kara_queue')
           .select('id')
           .eq('room_id', room_id)
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Calculate position: find last song in the same or previous round
-      const { data: lastInRound } = await supabase
+      const { data: lastInRound } = await supabaseAdmin
         .from('kara_queue')
         .select('position')
         .eq('room_id', room_id)
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // FIFO: Add to end
-      const { data: lastSong } = await supabase
+      const { data: lastSong } = await supabaseAdmin
         .from('kara_queue')
         .select('position')
         .eq('room_id', room_id)
@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Add to queue with metadata
-    const { data: queueItem, error: insertError } = await supabase
+    const { data: queueItem, error: insertError } = await supabaseAdmin
       .from('kara_queue')
       .insert({
         room_id,
@@ -222,6 +222,35 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[API] Successfully added to queue:', queueItem);
+
+    // v4.4: Auto-start first song - if no song is currently playing, start this one
+    if (!room.current_entry_id) {
+      console.log('[API] No song currently playing - auto-starting:', queueItem.id);
+      
+      // Update song status to 'playing'
+      const { error: songError } = await supabaseAdmin
+        .from('kara_queue')
+        .update({ status: 'playing' })
+        .eq('id', queueItem.id);
+      
+      if (songError) {
+        console.error('[API] Failed to update song status:', songError);
+        // Don't fail the request
+      }
+      
+      // Set as current song
+      const { error: roomError } = await supabaseAdmin
+        .from('kara_rooms')
+        .update({ current_entry_id: queueItem.id })
+        .eq('id', room_id);
+      
+      if (roomError) {
+        console.error('[API] Failed to auto-start song:', roomError);
+        // Don't fail the request, song is still in queue
+      } else {
+        console.log('[API] ✅ Auto-started first song (status: playing)');
+      }
+    }
 
     return NextResponse.json({
       success: true,

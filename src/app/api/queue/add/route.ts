@@ -59,10 +59,10 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // 1. Get room's queue_mode
+    // 1. Get room's queue_mode and current_entry_id
     const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
-      .select('queue_mode')
+      .select('queue_mode, current_entry_id')
       .eq('id', room_id)
       .single();
     
@@ -166,8 +166,37 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // 3. Return immediately (NO auto-start, NO ensurePlaying)
-    // Device will see song in queue on next poll (≤3s)
+    // v4.4: Auto-start first song - if no song is currently playing, start this one
+    if (!room.current_entry_id) {
+      console.log('[queue/add] No song currently playing - auto-starting:', data.id);
+      
+      // Update song status to 'playing'
+      const { error: songError } = await supabaseAdmin
+        .from('kara_queue')
+        .update({ status: 'playing' })
+        .eq('id', data.id);
+      
+      if (songError) {
+        console.error('[queue/add] Failed to update song status:', songError);
+        // Don't fail the request
+      }
+      
+      // Set as current song
+      const { error: roomError } = await supabaseAdmin
+        .from('kara_rooms')
+        .update({ current_entry_id: data.id })
+        .eq('id', room_id);
+      
+      if (roomError) {
+        console.error('[queue/add] Failed to auto-start song:', roomError);
+        // Don't fail the request, song is still in queue
+      } else {
+        console.log('[queue/add] ✅ Auto-started first song (status: playing)');
+      }
+    }
+
+    // Return immediately
+    // Device will see song in queue on next poll or Realtime update
     return NextResponse.json({
       success: true,
       queueItem: data

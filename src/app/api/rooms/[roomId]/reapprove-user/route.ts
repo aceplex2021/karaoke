@@ -1,9 +1,9 @@
 /**
- * API: Approve User
- * POST /api/rooms/[roomId]/approve-user
+ * API: Re-Approve User
+ * POST /api/rooms/[roomId]/reapprove-user
  * 
- * Host approves a pending user
- * v4.4.1: Fixed to use supabaseAdmin (no cache)
+ * Host re-approves a denied or expired user
+ * v4.4: Already using supabaseAdmin
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -38,18 +38,18 @@ export async function POST(
 
     if (!room || room.host_id !== host_id) {
       return NextResponse.json(
-        { error: 'Only host can approve users' },
+        { error: 'Only host can re-approve users' },
         { status: 403 }
       );
     }
 
-    // Approve user
+    // Re-approve user
     const { data, error } = await supabaseAdmin
       .from('kara_room_participants')
       .update({
         status: 'approved',
         approved_at: new Date().toISOString(),
-        expires_at: null, // Clear expiry
+        expires_at: null,
       })
       .eq('room_id', roomId)
       .eq('user_id', user_id)
@@ -57,14 +57,14 @@ export async function POST(
       .single();
 
     if (error) {
-      console.error('[API] Error approving user:', error);
+      console.error('[API] Error re-approving user:', error);
       return NextResponse.json(
-        { error: 'Failed to approve user' },
+        { error: 'Failed to re-approve user' },
         { status: 500 }
       );
     }
 
-    console.log('[API] User approved:', user_id);
+    console.log('[API] User re-approved:', user_id);
 
     return NextResponse.json({
       success: true,
@@ -72,7 +72,7 @@ export async function POST(
     });
 
   } catch (error: any) {
-    console.error('[API] Error in approve-user:', error);
+    console.error('[API] Error in reapprove-user:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -6,7 +6,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/server/lib/supabase';
+
+// v4.4.1: Disable Next.js caching - CRITICAL for real-time approval
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(
   request: NextRequest,
@@ -16,7 +20,7 @@ export async function GET(
     const { roomId } = await params;
 
     // Get pending users
-    const { data: pendingUsers, error } = await supabase
+    const { data: pendingUsers, error } = await supabaseAdmin
       .from('kara_room_participants')
       .select('id, user_id, user_name, joined_at, expires_at')
       .eq('room_id', roomId)
@@ -37,7 +41,7 @@ export async function GET(
     
     if (expired.length > 0) {
       // Auto-deny expired requests
-      await supabase
+      await supabaseAdmin
         .from('kara_room_participants')
         .update({ status: 'denied' })
         .in('id', expired.map(u => u.id));
