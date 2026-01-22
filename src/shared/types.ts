@@ -14,6 +14,7 @@ export interface Room {
   last_singer_id: string | null; // Round-robin cursor: last singer who had a turn
   queue_mode: 'round_robin' | 'fifo'; // Queue ordering mode
   approval_mode?: 'auto' | 'approval'; // v4.0: Join approval mode
+  primary_tv_id?: string | null; // v4.3: ID of primary TV (has audio)
 }
 
 export interface User {

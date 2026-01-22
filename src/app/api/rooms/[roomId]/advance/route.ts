@@ -60,6 +60,7 @@ export async function POST(
     
     // Successfully advanced to next song
     console.log('[advance] Successfully advanced to next song');
+    
     return NextResponse.json({
       success: true,
       advanced: true

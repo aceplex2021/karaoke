@@ -76,6 +76,11 @@ interface YouTubePlayerProps {
    * Player controls (default: true)
    */
   controls?: boolean;
+  
+  /**
+   * Mute audio (default: false) - v4.3 for secondary TVs
+   */
+  muted?: boolean;
 }
 
 export function YouTubePlayer({
@@ -89,6 +94,7 @@ export function YouTubePlayer({
   width = '100%',
   height = '100%',
   controls = true,
+  muted = false,
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
@@ -175,6 +181,12 @@ export function YouTubePlayer({
   const handleReady = (event: any) => {
     console.log('[YouTubePlayer] Player ready');
     setIsReady(true);
+    
+    // Mute if secondary TV (v4.3)
+    if (muted && event.target) {
+      event.target.mute();
+      console.log('[YouTubePlayer] Muted (secondary TV)');
+    }
     
     if (onReady) {
       onReady();

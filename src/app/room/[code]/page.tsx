@@ -567,6 +567,7 @@ export default function RoomPage() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [addingYoutube, setAddingYoutube] = useState(false);
   const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
+  const [clipboardYouTube, setClipboardYouTube] = useState<{ url: string; title: string } | null>(null); // v4.3: Detected YouTube URL from clipboard
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -986,6 +987,137 @@ export default function RoomPage() {
   };
 
   /**
+   * Detect YouTube URL from clipboard and show smart paste toast (v4.3)
+   */
+  const handleClipboardDetection = async () => {
+    try {
+      // Read clipboard
+      const clipboardText = await navigator.clipboard.readText();
+      
+      if (!clipboardText || !clipboardText.trim()) {
+        return;
+      }
+      
+      // Check if it's a YouTube URL
+      try {
+        const urlObj = new URL(clipboardText.trim());
+        const isYouTube = (
+          urlObj.hostname.includes('youtube.com') ||
+          urlObj.hostname === 'youtu.be'
+        );
+        
+        if (!isYouTube) {
+          return;
+        }
+        
+        console.log('[handleClipboardDetection] YouTube URL detected:', clipboardText);
+        
+        // Fetch video metadata using oEmbed API
+        const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(clipboardText.trim())}&format=json`;
+        const response = await fetch(oembedUrl);
+        
+        if (response.ok) {
+          const data = await response.json();
+          const title = data.title || 'YouTube Video';
+          
+          // Show toast with video title
+          setClipboardYouTube({
+            url: clipboardText.trim(),
+            title,
+          });
+          
+          // Auto-dismiss after 8 seconds
+          setTimeout(() => {
+            setClipboardYouTube(null);
+          }, 8000);
+          
+          console.log('[handleClipboardDetection] Fetched title:', title);
+        } else {
+          // Failed to fetch metadata, show generic toast
+          setClipboardYouTube({
+            url: clipboardText.trim(),
+            title: 'YouTube Video',
+          });
+          
+          setTimeout(() => {
+            setClipboardYouTube(null);
+          }, 8000);
+        }
+      } catch (urlError) {
+        // Not a valid URL, ignore
+        return;
+      }
+    } catch (err) {
+      // Clipboard permission denied or error, ignore silently
+      console.log('[handleClipboardDetection] Clipboard access denied or error');
+    }
+  };
+
+  /**
+   * Handle paste event to detect YouTube URLs (v4.3 - iOS fallback)
+   */
+  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    
+    if (!pastedText || !pastedText.trim()) {
+      return;
+    }
+    
+    // Check if it's a YouTube URL
+    try {
+      const urlObj = new URL(pastedText.trim());
+      const isYouTube = (
+        urlObj.hostname.includes('youtube.com') ||
+        urlObj.hostname === 'youtu.be'
+      );
+      
+      if (!isYouTube) {
+        return;
+      }
+      
+      console.log('[handlePaste] YouTube URL detected:', pastedText);
+      
+      // Prevent default paste to avoid filling input
+      e.preventDefault();
+      
+      // Fetch video metadata using oEmbed API
+      const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(pastedText.trim())}&format=json`;
+      const response = await fetch(oembedUrl);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const title = data.title || 'YouTube Video';
+        
+        // Show toast with video title
+        setClipboardYouTube({
+          url: pastedText.trim(),
+          title,
+        });
+        
+        // Auto-dismiss after 8 seconds
+        setTimeout(() => {
+          setClipboardYouTube(null);
+        }, 8000);
+        
+        console.log('[handlePaste] Fetched title:', title);
+      } else {
+        // Failed to fetch metadata, show generic toast
+        setClipboardYouTube({
+          url: pastedText.trim(),
+          title: 'YouTube Video',
+        });
+        
+        setTimeout(() => {
+          setClipboardYouTube(null);
+        }, 8000);
+      }
+    } catch (urlError) {
+      // Not a valid URL, allow default paste
+      return;
+    }
+  };
+
+  /**
    * Add YouTube video to queue via direct URL paste
    */
   const handleAddYouTubeUrl = async () => {
@@ -1367,32 +1499,108 @@ export default function RoomPage() {
                   <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold' }}>
                     📋 Paste YouTube Link
                   </h3>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="Paste YouTube URL here..."
-                      value={youtubeUrl}
-                      onChange={(e) => setYoutubeUrl(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleAddYouTubeUrl()}
-                      disabled={addingYoutube}
-                      style={{ flex: 1 }}
-                    />
-                    <button 
-                      className="btn btn-primary" 
-                      onClick={handleAddYouTubeUrl} 
-                      disabled={addingYoutube || !youtubeUrl.trim()}
-                      style={{ 
-                        opacity: (addingYoutube || !youtubeUrl.trim()) ? 0.6 : 1,
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {addingYoutube ? 'Adding...' : '+ Add to Queue'}
-                    </button>
+                  <div style={{ position: 'relative' }}>
+                    {/* Smart Paste Toast - positioned near input (v4.3) */}
+                    {clipboardYouTube && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: '100%',
+                          left: 0,
+                          right: 0,
+                          marginBottom: '0.5rem',
+                          zIndex: 1000,
+                          background: 'linear-gradient(135deg, rgba(0, 112, 243, 0.95), rgba(0, 88, 190, 0.95))',
+                          color: 'white',
+                          padding: '1rem',
+                          borderRadius: '12px',
+                          boxShadow: '0 8px 24px rgba(0, 112, 243, 0.4)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '1rem',
+                          animation: 'slideDown 0.3s ease-out',
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                            🎵 YouTube link detected!
+                          </div>
+                          <div style={{ fontSize: '0.85rem', opacity: 0.95 }}>
+                            {clipboardYouTube.title}
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await handleAddYouTubeUrlFromString(clipboardYouTube.url);
+                            setClipboardYouTube(null);
+                          }}
+                          style={{
+                            background: 'white',
+                            color: '#0070f3',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.9rem',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
+                          ✅ Add
+                        </button>
+                        <button
+                          onClick={() => setClipboardYouTube(null)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'white',
+                            fontSize: '1.5rem',
+                            cursor: 'pointer',
+                            padding: 0,
+                            width: '32px',
+                            height: '32px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0.8,
+                            flexShrink: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                    
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="Paste YouTube URL here..."
+                        value={youtubeUrl}
+                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleAddYouTubeUrl()}
+                        onClick={handleClipboardDetection}
+                        onPaste={handlePaste}
+                        disabled={addingYoutube}
+                        style={{ flex: 1 }}
+                      />
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={handleAddYouTubeUrl} 
+                        disabled={addingYoutube || !youtubeUrl.trim()}
+                        style={{ 
+                          opacity: (addingYoutube || !youtubeUrl.trim()) ? 0.6 : 1,
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {addingYoutube ? 'Adding...' : '+ Add to Queue'}
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
+                      💡 Tap the box above to detect copied YouTube links
+                    </p>
                   </div>
-                  <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
-                    💡 Copy a YouTube link from any app and paste it here
-                  </p>
                 </>
               )}
             </div>

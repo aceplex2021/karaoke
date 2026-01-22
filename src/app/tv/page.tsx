@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { v4 as uuidv4 } from 'uuid';
 import { api } from '@/lib/api';
 import type { ReorderQueueRequest } from '@/shared/types';
 import { getQRCodeUrl } from '@/lib/utils';
@@ -48,6 +49,8 @@ function TVModePageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tvUserId, setTvUserId] = useState<string | null>(null); // Host user ID from localStorage
+  const [tvId, setTvId] = useState<string | null>(null); // Unique ID for this TV instance
+  const [isPrimaryTV, setIsPrimaryTV] = useState(false); // Is this the primary TV (with audio)?
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -83,6 +86,18 @@ function TVModePageContent() {
       setTvUserId(storedUserId);
       console.log('[tv] Loaded host user ID from localStorage:', storedUserId);
     }
+
+    // Generate or load unique TV ID
+    let currentTvId = localStorage.getItem('tv_id');
+    if (!currentTvId) {
+      // Generate new UUID for this TV
+      currentTvId = uuidv4();
+      localStorage.setItem('tv_id', currentTvId);
+      console.log('[tv] Generated new TV ID:', currentTvId);
+    } else {
+      console.log('[tv] Loaded TV ID from localStorage:', currentTvId);
+    }
+    setTvId(currentTvId);
 
     // Resolve room: code > roomId param > localStorage
     const resolveAndLoadRoom = async () => {
@@ -148,6 +163,18 @@ function TVModePageContent() {
       }
     };
   }, [codeParam, roomIdParam]);
+
+  // Leave page warning (v4.3)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // Required for Chrome
+      return 'Are you sure you want to leave? This will close the TV display.';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // Auto-hide sidebar after 10 seconds of inactivity
   useEffect(() => {
@@ -265,6 +292,28 @@ function TVModePageContent() {
       const storedUserId = localStorage.getItem('tv_user_id');
       if (storedUserId) {
         setTvUserId(storedUserId);
+      }
+      
+      // Register as primary TV if no primary exists (v4.3)
+      const currentTvId = localStorage.getItem('tv_id');
+      if (currentTvId) {
+        try {
+          const response = await fetch(`/api/rooms/${roomId}/register-tv`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tv_id: currentTvId }),
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            setIsPrimaryTV(data.is_primary);
+            console.log('[tv] Registered as', data.is_primary ? 'PRIMARY' : 'SECONDARY', 'TV');
+          }
+        } catch (err) {
+          console.error('[tv] Failed to register TV:', err);
+          // Default to secondary if registration fails
+          setIsPrimaryTV(false);
+        }
       }
       
       // Start polling
@@ -644,6 +693,7 @@ function TVModePageContent() {
               }
             }}
             autoPlay={true}
+            muted={!isPrimaryTV}
             width="100%"
             height="100%"
           />
@@ -713,12 +763,38 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Song Title and User Name - Top Left */}
-      {showControls && currentSong && !needsUserInteraction && (
+      {/* TV Mode Badge - Top Left (v4.3) */}
+      {appConfig.commercialMode && (
         <div
           style={{
             position: 'absolute',
             top: '1rem',
+            left: '1rem',
+            background: isPrimaryTV 
+              ? 'linear-gradient(135deg, rgba(0, 255, 0, 0.9), rgba(0, 200, 0, 0.9))'
+              : 'linear-gradient(135deg, rgba(100, 100, 100, 0.9), rgba(60, 60, 60, 0.9))',
+            color: 'white',
+            padding: '0.5rem 1rem',
+            borderRadius: '8px',
+            fontSize: '0.9rem',
+            fontWeight: 'bold',
+            zIndex: 1100,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          {isPrimaryTV ? '🔊 PRIMARY DISPLAY' : '📺 SECONDARY DISPLAY'}
+        </div>
+      )}
+
+      {/* Song Title and User Name - Below badge */}
+      {showControls && currentSong && !needsUserInteraction && (
+        <div
+          style={{
+            position: 'absolute',
+            top: appConfig.commercialMode ? '4rem' : '1rem',
             left: '1rem',
             background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)',
             padding: '0.75rem 1rem',
