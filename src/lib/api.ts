@@ -259,12 +259,13 @@ export const api = {
   async reorderQueueItem(
     queueItemId: string,
     direction: 'up' | 'down',
-    userId: string
+    userId: string,
+    roomId?: string
   ): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/queue/item/${queueItemId}/reorder`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ direction, user_id: userId }),
+      body: JSON.stringify({ direction, user_id: userId, room_id: roomId }),
     });
     
     if (!res.ok) {
@@ -316,6 +317,14 @@ export const api = {
   async getUserRecentSongs(userId: string, limit: number = 20): Promise<{ history: any[] }> {
     const res = await fetch(`${API_BASE}/users/${userId}/history/recent?limit=${limit}`);
     if (!res.ok) throw new Error('Failed to fetch recent songs');
+    return res.json();
+  },
+
+  async getUserStatus(roomId: string, userId: string): Promise<{ status: string; participant: any }> {
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/user-status?userId=${userId}`);
+    if (!res.ok) {
+      throw new Error('Failed to get user status');
+    }
     return res.json();
   },
 

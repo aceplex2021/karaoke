@@ -104,14 +104,16 @@ export async function POST(request: NextRequest) {
       const isHost = room.host_id === user.id;
       const needsApproval = room.approval_mode === 'approval' && !isHost;
       
-      await supabaseAdmin.from('kara_room_participants').insert({
+      const insertData: any = {
         room_id: room.id,
         user_id: user.id,
-        user_name: display_name || 'Guest', // v4.0: Store user name
+        user_name: display_name || user.display_name || 'Guest', // v4.1: Cache user name for approval display
         role: isHost ? 'host' : 'user', // v4.0: Host role support
         status: needsApproval ? 'pending' : 'approved', // v4.0: Approval status
         expires_at: needsApproval ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null, // v4.0: 15-min expiry
-      });
+      };
+
+      await supabaseAdmin.from('kara_room_participants').insert(insertData);
     }
 
     return NextResponse.json({

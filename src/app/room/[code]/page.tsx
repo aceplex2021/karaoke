@@ -566,9 +566,11 @@ export default function RoomPage() {
   const [favoriteSongIds, setFavoriteSongIds] = useState<Set<string>>(new Set());
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [addingYoutube, setAddingYoutube] = useState(false);
+  const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const approvalCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Polling for approval status
   
   // Toast notifications
   const { success, error: showError, ToastContainer } = useToast();
@@ -615,6 +617,42 @@ export default function RoomPage() {
     }, 2500); // 2.5 seconds
   }, [refreshRoomState]);
 
+  /**
+   * Check user's approval status in room
+   */
+  const checkApprovalStatus = useCallback(async (roomId: string, userId: string) => {
+    try {
+      const statusData = await api.getUserStatus(roomId, userId);
+      setUserApprovalStatus(statusData.status);
+      console.log('[room] User approval status:', statusData.status);
+      return statusData.status;
+    } catch (err: any) {
+      console.error('[room] Failed to check approval status:', err);
+      return null;
+    }
+  }, []);
+
+  /**
+   * Start polling approval status (for pending users)
+   */
+  const startApprovalPolling = useCallback((roomId: string, userId: string) => {
+    if (approvalCheckIntervalRef.current) {
+      return;
+    }
+    
+    console.log('[room] Starting approval status polling');
+    approvalCheckIntervalRef.current = setInterval(async () => {
+      const status = await checkApprovalStatus(roomId, userId);
+      // Stop polling if approved or denied
+      if (status === 'approved' || status === 'denied') {
+        if (approvalCheckIntervalRef.current) {
+          clearInterval(approvalCheckIntervalRef.current);
+          approvalCheckIntervalRef.current = null;
+        }
+      }
+    }, 3000); // Check every 3 seconds
+  }, [checkApprovalStatus]);
+
   const joinRoom = useCallback(async (displayName: string) => {
     try {
       const fingerprint = getOrCreateFingerprint();
@@ -632,6 +670,18 @@ export default function RoomPage() {
       const isUserHost = roomData.host_id === userData.id;
       setIsHost(isUserHost);
       console.log('[Room] User is host:', isUserHost);
+      
+      // Check approval status (v4.0)
+      if (!isUserHost && appConfig.features.hostApproval) {
+        const status = await checkApprovalStatus(roomData.id, userData.id);
+        if (status === 'pending') {
+          // Start polling for approval updates
+          startApprovalPolling(roomData.id, userData.id);
+        }
+      } else {
+        // Host is always approved
+        setUserApprovalStatus('approved');
+      }
       
       // Ensure display name is stored (backend might have updated it)
       if (userData.display_name) {
@@ -1100,12 +1150,12 @@ export default function RoomPage() {
   };
 
   const handleReorder = async (queueItemId: string, direction: 'up' | 'down') => {
-    if (!user) return;
+    if (!user || !room) return;
     
     setReorderingId(queueItemId);
     
     try {
-      await api.reorderQueueItem(queueItemId, direction, user.id);
+      await api.reorderQueueItem(queueItemId, direction, user.id, room.id);
       success(`Song moved ${direction === 'up' ? 'up' : 'down'}`);
       // UI will update on next poll (≤2.5s)
     } catch (err: any) {
@@ -1171,6 +1221,51 @@ export default function RoomPage() {
           </div>
         )}
       </div>
+
+      {/* Approval Status Banner (v4.0) */}
+      {userApprovalStatus === 'pending' && (
+        <div style={{
+          background: 'linear-gradient(135deg, #FFA500 0%, #FF8C00 100%)',
+          color: 'white',
+          padding: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}>
+          <div style={{ fontSize: '1.5rem' }}>⏳</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
+              Waiting for Host Approval
+            </div>
+            <div style={{ fontSize: '0.85rem', opacity: 0.95 }}>
+              The host will review your request shortly. You'll be able to add songs once approved.
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {userApprovalStatus === 'denied' && (
+        <div style={{
+          background: 'linear-gradient(135deg, #E53935 0%, #C62828 100%)',
+          color: 'white',
+          padding: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}>
+          <div style={{ fontSize: '1.5rem' }}>❌</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
+              Access Denied
+            </div>
+            <div style={{ fontSize: '0.85rem', opacity: 0.95 }}>
+              Your request to join this room was not approved by the host.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '2px solid #ddd' }}>
@@ -1437,14 +1532,26 @@ export default function RoomPage() {
             </div>
           )}
 
-          {/* Queue Section (User's Songs Only) */}
+          {/* Queue Section - Different for Host vs Users */}
           <div style={{ width: '100%', overflow: 'visible' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 'bold', marginBottom: '0.75rem' }}>
-              Your Queue
+              {isHost ? '🎵 Songs Queue (All Users)' : 'Your Queue'}
             </h3>
+            {isHost && (
+              <div style={{ 
+                marginBottom: '0.75rem', 
+                padding: '0.75rem', 
+                background: '#fff3cd', 
+                borderRadius: '8px', 
+                fontSize: '0.85rem', 
+                color: '#856404' 
+              }}>
+                💡 <strong>Host Controls:</strong> You can reorder or remove any song from any user
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '100%' }}>
-              {userQueue.length > 0 ? (
-                userQueue.map((item, index) => (
+              {(isHost ? queue.filter(q => q.status === 'pending') : userQueue).length > 0 ? (
+                (isHost ? queue.filter(q => q.status === 'pending') : userQueue).map((item, index) => (
                   <div
                     key={item.id}
                     style={{
@@ -1471,6 +1578,12 @@ export default function RoomPage() {
                           {item.artist}
                         </div>
                       )}
+                      {/* Show user name for host view */}
+                      {isHost && (
+                        <div style={{ fontSize: '0.85rem', color: '#0070f3', marginTop: '0.25rem' }}>
+                          🎤 {item.user_name || 'Unknown'}
+                        </div>
+                      )}
                     </div>
                     
                     {/* Controls: Up/Down Arrows + Remove Button */}
@@ -1478,13 +1591,13 @@ export default function RoomPage() {
                       {/* Up Arrow */}
                       <button
                         onClick={() => handleReorder(item.id, 'up')}
-                        disabled={reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0}
+                        disabled={reorderingId === item.id || index === 0}
                         style={{
                           padding: '0.5rem',
-                          background: userQueue.findIndex(q => q.id === item.id) === 0 ? '#f5f5f5' : '#0070f3',
+                          background: index === 0 ? '#f5f5f5' : '#0070f3',
                           border: 'none',
                           borderRadius: '8px',
-                          cursor: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0) ? 'not-allowed' : 'pointer',
+                          cursor: (reorderingId === item.id || index === 0) ? 'not-allowed' : 'pointer',
                           fontSize: '1.2rem',
                           lineHeight: 1,
                           minWidth: '44px',
@@ -1493,7 +1606,7 @@ export default function RoomPage() {
                           alignItems: 'center',
                           justifyContent: 'center',
                           transition: 'all 0.2s',
-                          opacity: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === 0) ? 0.5 : 1,
+                          opacity: (reorderingId === item.id || index === 0) ? 0.5 : 1,
                           color: 'white',
                         }}
                         title="Move up"
@@ -1504,13 +1617,13 @@ export default function RoomPage() {
                       {/* Down Arrow */}
                       <button
                         onClick={() => handleReorder(item.id, 'down')}
-                        disabled={reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1}
+                        disabled={reorderingId === item.id || index === (isHost ? queue.filter(q => q.status === 'pending') : userQueue).length - 1}
                         style={{
                           padding: '0.5rem',
-                          background: userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1 ? '#f5f5f5' : '#0070f3',
+                          background: index === (isHost ? queue.filter(q => q.status === 'pending') : userQueue).length - 1 ? '#f5f5f5' : '#0070f3',
                           border: 'none',
                           borderRadius: '8px',
-                          cursor: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1) ? 'not-allowed' : 'pointer',
+                          cursor: (reorderingId === item.id || index === (isHost ? queue.filter(q => q.status === 'pending') : userQueue).length - 1) ? 'not-allowed' : 'pointer',
                           fontSize: '1.2rem',
                           lineHeight: 1,
                           minWidth: '44px',
@@ -1519,7 +1632,7 @@ export default function RoomPage() {
                           alignItems: 'center',
                           justifyContent: 'center',
                           transition: 'all 0.2s',
-                          opacity: (reorderingId === item.id || userQueue.findIndex(q => q.id === item.id) === userQueue.length - 1) ? 0.5 : 1,
+                          opacity: (reorderingId === item.id || index === (isHost ? queue.filter(q => q.status === 'pending') : userQueue).length - 1) ? 0.5 : 1,
                           color: 'white',
                         }}
                         title="Move down"
@@ -1529,7 +1642,7 @@ export default function RoomPage() {
                       
                       {/* Remove Button */}
                       <button
-                        onClick={() => handleRemoveFromQueue(item.id, item.song?.title || 'Song')}
+                        onClick={() => handleRemoveFromQueue(item.id, item.title || item.song?.title || 'Song')}
                         disabled={removingFromQueue}
                         style={{
                           padding: '0.5rem',
@@ -1808,7 +1921,11 @@ export default function RoomPage() {
             Once approved, they can add songs to the queue.
           </div>
           
-          <ApprovalQueue roomId={room.id} hostId={room.host_id || user?.id || ''} />
+          <ApprovalQueue 
+            roomId={room.id} 
+            hostId={room.host_id || user?.id || ''} 
+            onNewUser={(userName) => success(`🎤 ${userName} wants to join the party!`)}
+          />
         </div>
       )}
 
