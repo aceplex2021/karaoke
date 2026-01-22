@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { getOrCreateFingerprint } from '@/lib/utils';
+import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
 import { useToast } from '@/components/Toast';
 import { VersionCard } from '@/components/VersionCard';
@@ -877,6 +877,65 @@ export default function RoomPage() {
   };
 
   /**
+   * Add YouTube video to queue (helper that accepts URL parameter)
+   */
+  const handleAddYouTubeUrlFromString = async (url: string) => {
+    if (!room || !user) {
+      setError('Room or user not found. Please refresh the page.');
+      return;
+    }
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      showError('Invalid YouTube URL');
+      return;
+    }
+
+    // Extract video ID from various YouTube URL formats
+    let videoId = '';
+    try {
+      const urlObj = new URL(trimmedUrl);
+      
+      // youtube.com/watch?v=VIDEO_ID
+      if (urlObj.hostname.includes('youtube.com') && urlObj.searchParams.has('v')) {
+        videoId = urlObj.searchParams.get('v') || '';
+      }
+      // youtu.be/VIDEO_ID
+      else if (urlObj.hostname === 'youtu.be') {
+        videoId = urlObj.pathname.slice(1); // Remove leading slash
+      }
+      
+      if (!videoId) {
+        showError('Invalid YouTube URL format');
+        return;
+      }
+    } catch (err) {
+      showError('Invalid URL format');
+      return;
+    }
+
+    setAddingYoutube(true);
+    try {
+      await api.addYouTubeToQueue({
+        room_id: room.id,
+        user_id: user.id,
+        youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+        title: '', // Backend will fetch title
+      });
+
+      setError('');
+      success('YouTube video added to queue!');
+    } catch (err: any) {
+      console.error('[handleAddYouTubeUrlFromString] Failed:', err);
+      const errorMessage = err.message || 'Failed to add YouTube video to queue';
+      setError(errorMessage);
+      showError(errorMessage);
+    } finally {
+      setAddingYoutube(false);
+    }
+  };
+
+  /**
    * Add YouTube video to queue via direct URL paste
    */
   const handleAddYouTubeUrl = async () => {
@@ -1190,50 +1249,57 @@ export default function RoomPage() {
       {/* Search Tab */}
       {activeTab === 'search' && (
         <div style={{ padding: '1rem' }}>
-          {/* v4.0 YouTube Mode: Redirect to YouTube */}
+          {/* v4.0 YouTube Mode: Device-specific UI */}
           {appConfig.features.youtubeSearch && (
             <div>
-              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold' }}>
-                🎤 Search for Songs on YouTube
-              </h3>
-              <SearchRedirect 
-                placeholder="Search for a karaoke song..."
-                buttonText="🔍 Search on YouTube"
-                showInstructions={true}
-              />
-
-              {/* YouTube URL Paste Box */}
-              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #eee' }}>
-                <h3 style={{ fontSize: '1rem', marginBottom: '1rem', fontWeight: 'bold', color: '#666' }}>
-                  📋 Or Paste YouTube Link
-                </h3>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="Paste YouTube URL here..."
-                    value={youtubeUrl}
-                    onChange={(e) => setYoutubeUrl(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddYouTubeUrl()}
-                    disabled={addingYoutube}
-                    style={{ flex: 1 }}
+              {/* Android: Show YouTube search box only */}
+              {isAndroid() && (
+                <>
+                  <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold' }}>
+                    🎤 Search for Songs on YouTube
+                  </h3>
+                  <SearchRedirect 
+                    placeholder="Search for a karaoke song..."
+                    buttonText="🔍 Search on YouTube"
+                    showInstructions={true}
                   />
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={handleAddYouTubeUrl} 
-                    disabled={addingYoutube || !youtubeUrl.trim()}
-                    style={{ 
-                      opacity: (addingYoutube || !youtubeUrl.trim()) ? 0.6 : 1,
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {addingYoutube ? 'Adding...' : '+ Add to Queue'}
-                  </button>
-                </div>
-                <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
-                  💡 Copy a YouTube link from any app and paste it here
-                </p>
-              </div>
+                </>
+              )}
+
+              {/* iOS/Desktop: Show paste link box only */}
+              {(isIOS() || isDesktop()) && (
+                <>
+                  <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold' }}>
+                    📋 Paste YouTube Link
+                  </h3>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="Paste YouTube URL here..."
+                      value={youtubeUrl}
+                      onChange={(e) => setYoutubeUrl(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleAddYouTubeUrl()}
+                      disabled={addingYoutube}
+                      style={{ flex: 1 }}
+                    />
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleAddYouTubeUrl} 
+                      disabled={addingYoutube || !youtubeUrl.trim()}
+                      style={{ 
+                        opacity: (addingYoutube || !youtubeUrl.trim()) ? 0.6 : 1,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {addingYoutube ? 'Adding...' : '+ Add to Queue'}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
+                    💡 Copy a YouTube link from any app and paste it here
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -1528,70 +1594,95 @@ export default function RoomPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {history.map((item) => (
-                <div 
-                  key={item.id} 
-                  className="card" 
-                  style={{ 
-                    padding: '0.75rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                      {item.song?.title || 'Unknown'}
+              {history.map((item) => {
+                const isYouTube = item.source_type === 'youtube' || item.youtube_url;
+                const favoriteId = isYouTube ? item.id : item.version_id; // Use queue_item_id for YouTube, version_id for database
+                
+                return (
+                  <div 
+                    key={item.id} 
+                    className="card" 
+                    style={{ 
+                      padding: '0.75rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                        {item.song?.title || 'Unknown'}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                        {item.song?.artist || 'Unknown'}
+                        {!isYouTube && item.song?.tone && ` • ${item.song.tone}`}
+                        {!isYouTube && item.song?.mixer && ` • ${item.song.mixer}`}
+                        {!isYouTube && item.song?.style && ` • ${item.song.style}`}
+                        {isYouTube && item.youtube_url && (
+                          <span style={{ color: '#0070f3', wordBreak: 'break-all' }}>
+                            {' • '}
+                            <a 
+                              href={item.youtube_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: '#0070f3', textDecoration: 'underline' }}
+                            >
+                              {item.youtube_url}
+                            </a>
+                          </span>
+                        )}
+                        {' • '}{new Date(item.sung_at).toLocaleDateString()}
+                        {item.times_sung > 1 && ` • ${item.times_sung} times`}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                      {item.song?.artist || 'Unknown'}
-                      {item.song?.tone && ` • ${item.song.tone}`}
-                      {item.song?.mixer && ` • ${item.song.mixer}`}
-                      {item.song?.style && ` • ${item.song.style}`}
-                      {' • '}{new Date(item.sung_at).toLocaleDateString()}
-                      {item.times_sung > 1 && ` • ${item.times_sung} times`}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        onClick={() => favoriteId && toggleFavorite(favoriteId)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.5rem',
+                          cursor: 'pointer',
+                          padding: '0.25rem',
+                          transition: 'transform 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                        title={favoriteSongIds.has(favoriteId) ? 'Remove from favorites' : 'Add to favorites'}
+                      >
+                        {favoriteSongIds.has(favoriteId) ? '❤️' : '🤍'}
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          if (!room || !user) return;
+                          
+                          if (isYouTube && item.youtube_url) {
+                            // Add YouTube song to queue
+                            console.log('[History] Add to Queue clicked for YouTube URL:', item.youtube_url);
+                            await handleAddYouTubeUrlFromString(item.youtube_url);
+                          } else if (item.version_id) {
+                            // Add database song to queue
+                            console.log('[History] Add to Queue clicked for version_id:', item.version_id);
+                            await handleAddVersionToQueue(item.version_id);
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.5rem 1rem',
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        Add to Queue
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <button
-                      onClick={() => item.version_id && toggleFavorite(item.version_id)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        fontSize: '1.5rem',
-                        cursor: 'pointer',
-                        padding: '0.25rem',
-                        transition: 'transform 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'scale(1.2)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)';
-                      }}
-                      title={favoriteSongIds.has(item.version_id) ? 'Remove from favorites' : 'Add to favorites'}
-                    >
-                      {favoriteSongIds.has(item.version_id) ? '❤️' : '🤍'}
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={async () => {
-                        if (!room || !user || !item.version_id) return;
-                        console.log('[History] Add to Queue clicked for version_id:', item.version_id);
-                        
-                        // Directly add version to queue (we have version_id from history)
-                        await handleAddVersionToQueue(item.version_id);
-                      }}
-                      style={{ 
-                        padding: '0.5rem 1rem',
-                        fontSize: '0.9rem',
-                      }}
-                    >
-                      Add to Queue
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1614,67 +1705,92 @@ export default function RoomPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {favorites.map((version: any) => (
-                <div 
-                  key={version.id} 
-                  className="card" 
-                  style={{ 
-                    padding: '0.75rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                      {version.title_display || version.title || 'Unknown'}
+              {favorites.map((version: any) => {
+                const isYouTube = version.source_type === 'youtube' || version.youtube_url;
+                
+                return (
+                  <div 
+                    key={version.id} 
+                    className="card" 
+                    style={{ 
+                      padding: '0.75rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                        {version.title_display || version.title || 'Unknown'}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                        {version.artist_name || version.artist || 'Unknown Artist'} 
+                        {!isYouTube && version.tone && ` • ${version.tone}`}
+                        {!isYouTube && version.mixer && ` • ${version.mixer}`}
+                        {!isYouTube && version.style && ` • ${version.style}`}
+                        {isYouTube && version.youtube_url && (
+                          <span style={{ color: '#0070f3', wordBreak: 'break-all' }}>
+                            {' • '}
+                            <a 
+                              href={version.youtube_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: '#0070f3', textDecoration: 'underline' }}
+                            >
+                              {version.youtube_url}
+                            </a>
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                      {version.artist_name || version.artist || 'Unknown Artist'} 
-                      {version.tone && ` • ${version.tone}`}
-                      {version.mixer && ` • ${version.mixer}`}
-                      {version.style && ` • ${version.style}`}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        onClick={() => toggleFavorite(version.id)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.5rem',
+                          cursor: 'pointer',
+                          padding: '0.25rem',
+                          transition: 'transform 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                        title="Remove from favorites"
+                      >
+                        ❤️
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          if (!room || !user) return;
+                          
+                          if (isYouTube && version.youtube_url) {
+                            // Add YouTube song to queue
+                            console.log('[Favorites] Add to Queue clicked for YouTube URL:', version.youtube_url);
+                            await handleAddYouTubeUrlFromString(version.youtube_url);
+                          } else {
+                            // Add database song to queue
+                            console.log('[Favorites] Add to Queue clicked for version_id:', version.id);
+                            await handleAddVersionToQueue(version.id);
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.5rem 1rem',
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        Add to Queue
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <button
-                      onClick={() => toggleFavorite(version.id)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        fontSize: '1.5rem',
-                        cursor: 'pointer',
-                        padding: '0.25rem',
-                        transition: 'transform 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'scale(1.2)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)';
-                      }}
-                      title="Remove from favorites"
-                    >
-                      ❤️
-                    </button>
-                    <button
-                      className="btn btn-sm"
-                      onClick={async () => {
-                        if (!room || !user) return;
-                        console.log('[Favorites] Add to Queue clicked for version_id:', version.id);
-                        // Directly add version to queue (same as History tab)
-                        await handleAddVersionToQueue(version.id);
-                      }}
-                      style={{ 
-                        padding: '0.5rem 1rem',
-                        fontSize: '0.9rem',
-                      }}
-                    >
-                      Add to Queue
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

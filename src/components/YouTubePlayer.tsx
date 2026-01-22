@@ -186,7 +186,9 @@ export function YouTubePlayer({
         const currentTime = playerRef.current.getCurrentTime();
         const duration = playerRef.current.getDuration();
         
-        if (onTimeUpdate && currentTime && duration) {
+        // Always call onTimeUpdate even if currentTime or duration is 0
+        // This ensures the TV page always has accurate values
+        if (onTimeUpdate && typeof currentTime === 'number' && typeof duration === 'number') {
           onTimeUpdate(currentTime, duration);
         }
       }

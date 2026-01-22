@@ -51,3 +51,25 @@ export function debounce<T extends (...args: any[]) => any>(
     timeout = setTimeout(later, wait);
   };
 }
+
+/**
+ * Device detection utilities
+ * Used for conditional UI rendering based on device type
+ */
+export function isAndroid(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /Android/i.test(navigator.userAgent);
+}
+
+export function isIOS(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+export function isMobile(): boolean {
+  return isAndroid() || isIOS();
+}
+
+export function isDesktop(): boolean {
+  return !isMobile();
+}

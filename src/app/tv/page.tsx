@@ -741,7 +741,7 @@ function TVModePageContent() {
       )}
 
       {/* Up Next Flying Banner - Scrolling marquee at top center (only shows in last 60 seconds) */}
-      {upNext && currentSong && !needsUserInteraction && duration > 0 && (duration - currentTime) <= 60 && (
+      {upNext && currentSong && !needsUserInteraction && duration > 0 && currentTime > 0 && (duration - currentTime) <= 60 && (duration - currentTime) >= 0 && (
         <div
           style={{
             position: 'absolute',
@@ -796,8 +796,8 @@ function TVModePageContent() {
         }
       `}</style>
 
-      {/* Controls Overlay - YouTube style */}
-      {showControls && currentSong && !needsUserInteraction && (
+      {/* Controls Overlay - YouTube style (v3.5 only, hidden for v4.0 YouTube mode) */}
+      {showControls && currentSong && !needsUserInteraction && !isYouTubeSong && (
         <div
           style={{
             position: 'absolute',

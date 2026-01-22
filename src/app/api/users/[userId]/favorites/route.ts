@@ -31,7 +31,8 @@ export async function GET(
       return NextResponse.json({ favorites: [] });
     }
 
-    // Fetch version details for favorites (treating IDs as version_ids)
+    // v4.0: Favorites can be either version_ids (database) or queue_item_ids (YouTube)
+    // Try to fetch as version_ids first
     const { data: versions, error: versionsError } = await supabaseAdmin
       .from('kara_versions')
       .select(`
@@ -50,7 +51,45 @@ export async function GET(
       return NextResponse.json({ error: 'Failed to fetch favorite versions' }, { status: 500 });
     }
 
-    return NextResponse.json({ favorites: versions || [] });
+    // Find which IDs were found as versions
+    const foundVersionIds = new Set((versions || []).map(v => v.id));
+    const notFoundIds = favoriteSongIds.filter(id => !foundVersionIds.has(id));
+
+    // For IDs not found in versions, try fetching from queue (YouTube songs)
+    let youtubeFavorites: any[] = [];
+    if (notFoundIds.length > 0) {
+      const { data: queueItems, error: queueError } = await supabaseAdmin
+        .from('kara_queue')
+        .select('id, youtube_url, metadata')
+        .eq('source_type', 'youtube')
+        .in('id', notFoundIds);
+
+      if (queueError) {
+        console.error('[GET favorites] Error fetching YouTube queue items:', queueError);
+      } else if (queueItems) {
+        // Format YouTube items to match version structure
+        youtubeFavorites = queueItems.map(item => {
+          const metadata = item.metadata || {};
+          return {
+            id: item.id,
+            title_display: metadata.title || 'YouTube Video',
+            artist_name: 'YouTube',
+            tone: null,
+            mixer: null,
+            style: null,
+            performance_type: null,
+            youtube_url: item.youtube_url,
+            metadata: metadata,
+            source_type: 'youtube',
+          };
+        });
+      }
+    }
+
+    // Combine database and YouTube favorites
+    const allFavorites = [...(versions || []), ...youtubeFavorites];
+
+    return NextResponse.json({ favorites: allFavorites });
   } catch (error) {
     console.error('[GET favorites] Unexpected error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

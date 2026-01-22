@@ -123,40 +123,59 @@ export async function POST(request: NextRequest) {
 
     // Calculate position based on queue mode
     let position = 1;
+    let roundNumber = 1;
+    const queueMode = room.queue_mode || 'fifo';
 
-    if (room.queue_mode === 'round_robin') {
-      // Round-robin: Calculate fair position
-      const { data: userQueue } = await supabase
+    if (queueMode === 'round_robin') {
+      // Round-robin: Calculate fair position and round number
+      
+      // Get max round number
+      const { data: maxRoundData } = await supabase
         .from('kara_queue')
-        .select('id')
+        .select('round_number')
         .eq('room_id', room_id)
-        .eq('user_id', user_id)
-        .is('played_at', null);
-
-      const userSongCount = userQueue?.length || 0;
-
-      // Find the next available position after other users' songs
-      const { data: allQueue } = await supabase
-        .from('kara_queue')
-        .select('position, user_id')
-        .eq('room_id', room_id)
-        .is('played_at', null)
-        .order('position', { ascending: true });
-
-      if (allQueue && allQueue.length > 0) {
-        let targetPosition = 0;
-        let otherUsersAtThisRound = 0;
-
-        for (const song of allQueue) {
-          if (song.user_id !== user_id) {
-            const userSongsCount = allQueue.filter(s => s.user_id === song.user_id).length;
-            if (userSongsCount <= userSongCount) {
-              targetPosition = song.position;
-            }
-          }
+        .eq('status', 'pending')
+        .order('round_number', { ascending: false })
+        .limit(1);
+      
+      const maxRound = maxRoundData?.[0]?.round_number || 0;
+      
+      // Find the first round (1 to maxRound+1) where this user doesn't have a song
+      let foundRound = false;
+      for (let round = 1; round <= maxRound + 1; round++) {
+        const { data: userInRound } = await supabase
+          .from('kara_queue')
+          .select('id')
+          .eq('room_id', room_id)
+          .eq('user_id', user_id)
+          .eq('status', 'pending')
+          .eq('round_number', round)
+          .limit(1);
+        
+        if (!userInRound || userInRound.length === 0) {
+          roundNumber = round;
+          foundRound = true;
+          break;
         }
+      }
+      
+      // Fallback (shouldn't happen)
+      if (!foundRound) {
+        roundNumber = maxRound + 1;
+      }
 
-        position = targetPosition + 1;
+      // Calculate position: find last song in the same or previous round
+      const { data: lastInRound } = await supabase
+        .from('kara_queue')
+        .select('position')
+        .eq('room_id', room_id)
+        .eq('status', 'pending')
+        .lte('round_number', roundNumber)
+        .order('position', { ascending: false })
+        .limit(1);
+
+      if (lastInRound && lastInRound.length > 0) {
+        position = lastInRound[0].position + 1;
       }
     } else {
       // FIFO: Add to end
@@ -164,7 +183,7 @@ export async function POST(request: NextRequest) {
         .from('kara_queue')
         .select('position')
         .eq('room_id', room_id)
-        .is('played_at', null)
+        .eq('status', 'pending')
         .order('position', { ascending: false })
         .limit(1);
 
@@ -180,6 +199,7 @@ export async function POST(request: NextRequest) {
         room_id,
         user_id,
         position,
+        round_number: roundNumber,
         source_type: 'youtube',
         youtube_url,
         version_id: null, // YouTube entries don't have version_id
