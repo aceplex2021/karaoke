@@ -26,10 +26,10 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { roomId: string } }
-) {
+  { params }: { params: Promise<{ roomId: string }> }
+)  {
   try {
-    const { roomId } = params;
+    const { roomId } = await params;
     
     console.log('[advance] Called for room:', roomId);
     

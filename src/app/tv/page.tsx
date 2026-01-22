@@ -7,6 +7,9 @@ import type { ReorderQueueRequest } from '@/shared/types';
 import { getQRCodeUrl } from '@/lib/utils';
 import QRCode from '@/components/QRCode';
 import type { Room, QueueItem } from '@/shared/types';
+import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { appConfig } from '@/lib/config';
+import { extractYouTubeId } from '@/lib/youtube';
 
 /**
  * Format seconds to MM:SS or HH:MM:SS
@@ -36,6 +39,7 @@ function formatTime(seconds: number): string {
 function TVModePageContent() {
   const searchParams = useSearchParams();
   const roomIdParam = searchParams.get('roomId');
+  const codeParam = searchParams.get('code');
   
   const [room, setRoom] = useState<Room | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -73,13 +77,6 @@ function TVModePageContent() {
   useEffect(() => {
     const storedRoomId = localStorage.getItem('tv_room_id');
     const storedUserId = localStorage.getItem('tv_user_id'); // Host user ID
-    const roomId = roomIdParam || storedRoomId;
-
-    if (!roomId) {
-      setError('No room ID found. Please create a room first.');
-      setLoading(false);
-      return;
-    }
 
     // Load host user ID
     if (storedUserId) {
@@ -87,24 +84,70 @@ function TVModePageContent() {
       console.log('[tv] Loaded host user ID from localStorage:', storedUserId);
     }
 
-    // Cleanup previous polling if roomId changed
-    if (pollingIntervalRef.current && roomIdRef.current !== roomId) {
-      console.log('[tv] Room ID changed, cleaning up previous polling');
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
+    // Resolve room: code > roomId param > localStorage
+    const resolveAndLoadRoom = async () => {
+      let roomId: string | null = null;
 
-    loadRoom(roomId);
+      // Priority 1: Resolve code to roomId
+      if (codeParam) {
+        const code = codeParam.toUpperCase();
+        console.log('[tv] Resolving code:', code);
+        try {
+          const response = await fetch(`/api/rooms/code/${code}`);
+          if (response.ok) {
+            const data = await response.json();
+            roomId = data.room.id as string;
+            console.log('[tv] Resolved code to roomId:', roomId);
+            // Save to localStorage for future loads
+            localStorage.setItem('tv_room_id', roomId);
+          } else {
+            setError(`Room code "${code}" not found`);
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.error('[tv] Error resolving code:', err);
+          setError('Failed to resolve room code');
+          setLoading(false);
+          return;
+        }
+      }
+      // Priority 2: Direct roomId param
+      else if (roomIdParam) {
+        roomId = roomIdParam;
+        localStorage.setItem('tv_room_id', roomId);
+      }
+      // Priority 3: localStorage
+      else if (storedRoomId) {
+        roomId = storedRoomId;
+      }
+
+      if (!roomId) {
+        setError('No room ID or code found. Please scan QR code or create a room first.');
+        setLoading(false);
+        return;
+      }
+
+      // Cleanup previous polling if roomId changed
+      if (pollingIntervalRef.current && roomIdRef.current !== roomId) {
+        console.log('[tv] Room ID changed, cleaning up previous polling');
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+
+      loadRoom(roomId);
+    };
+
+    resolveAndLoadRoom();
     
     // Cleanup on unmount or roomId change
     return () => {
-      console.log('[tv] Cleanup effect running for roomId:', roomId);
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
       }
     };
-  }, [roomIdParam]);
+  }, [codeParam, roomIdParam]);
 
   // Auto-hide sidebar after 10 seconds of inactivity
   useEffect(() => {
@@ -263,6 +306,26 @@ function TVModePageContent() {
     if (currentVideo && isFinite(currentVideo.currentTime) && currentVideo.currentTime >= 0) {
       // Always update - this is what fullscreen uses
       setCurrentTime(currentVideo.currentTime);
+    }
+  }, []);
+
+  /**
+   * Handle playback error - advance to next song
+   */
+  const handlePlaybackError = useCallback(async () => {
+    console.error('[tv] Playback error - advancing to next song');
+    setError('Playback error - skipping to next song');
+    
+    const latestRoom = roomRef.current;
+    if (latestRoom) {
+      try {
+        await api.advancePlayback(latestRoom.id);
+        console.log('[tv] /advance succeeded after error');
+        // Clear error after a short delay
+        setTimeout(() => setError(''), 3000);
+      } catch (err) {
+        console.error('[tv] Failed to advance after error:', err);
+      }
     }
   }, []);
 
@@ -552,26 +615,58 @@ function TVModePageContent() {
     );
   }
 
+  // Check if current song is YouTube (v4.0)
+  const isYouTubeSong = currentSong?.source_type === 'youtube' && currentSong?.youtube_url;
+  
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
       {/* Video Container - Full screen */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
-        {/* Video Player - key={media_url} forces remount on URL change */}
-        <video
-          key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
-          ref={videoRef}
-          autoPlay
-          playsInline
-          // onEnded is handled by both addEventListener AND onEnded prop for reliability
-          onEnded={handleEnded}
-          // onTimeUpdate as prop for reliability (like fullscreen)
-          onTimeUpdate={handleTimeUpdate}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-          }}
-        />
+        {/* YouTube Player (v4.0 Commercial Mode) */}
+        {isYouTubeSong && currentSong?.youtube_url && (
+          <YouTubePlayer
+            key={currentSong.id}
+            videoUrl={currentSong.youtube_url}
+            onReady={() => {
+              // Set playing queue item ID so handleEnded knows which song is playing
+              playingQueueItemIdRef.current = currentSong.id;
+              console.log('[TV] YouTube player ready, tracking queue item:', currentSong.id);
+            }}
+            onEnded={handleEnded}
+            onError={(code) => {
+              console.error('[TV] YouTube error:', code);
+              handlePlaybackError();
+            }}
+            onTimeUpdate={(current, dur) => {
+              setCurrentTime(current);
+              if (dur && dur > 0) {
+                setDuration(dur);
+              }
+            }}
+            autoPlay={true}
+            width="100%"
+            height="100%"
+          />
+        )}
+        
+        {/* HTML5 Video Player (v3.5 Database Mode) */}
+        {!isYouTubeSong && (
+          <video
+            key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
+            ref={videoRef}
+            autoPlay
+            playsInline
+            // onEnded is handled by both addEventListener AND onEnded prop for reliability
+            onEnded={handleEnded}
+            // onTimeUpdate as prop for reliability (like fullscreen)
+            onTimeUpdate={handleTimeUpdate}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+            }}
+          />
+        )}
 
       {/* User Interaction Overlay (for autoplay) */}
       {needsUserInteraction && !hasUserInteracted && (
@@ -635,13 +730,11 @@ function TVModePageContent() {
           {currentSong && (
             <div style={{ color: 'white' }}>
               <div style={{ fontSize: '1.1rem', fontWeight: 'bold', lineHeight: '1.3', marginBottom: '0.25rem' }}>
-                {currentSong.song?.title || 'Unknown Song'}
+                {currentSong.title || 'Unknown Song'}
               </div>
-              {currentSong.user && (
-                <div style={{ fontSize: '0.9rem', opacity: 0.85 }}>
-                  {currentSong.user.display_name || 'Guest'}
-                </div>
-              )}
+              <div style={{ fontSize: '0.9rem', opacity: 0.85 }}>
+                {currentSong.user_name || 'Guest'}
+              </div>
             </div>
           )}
         </div>
@@ -684,13 +777,9 @@ function TVModePageContent() {
             >
               <span style={{ fontSize: '2rem' }}>🎵</span>
               <span style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '900' }}>UP NEXT:</span>
-              <span>{upNext.song?.title || 'Unknown Song'}</span>
-              {upNext.user && (
-                <>
-                  <span style={{ fontSize: '1.8rem' }}>👤</span>
-                  <span>{upNext.user.display_name || 'Guest'}</span>
-                </>
-              )}
+              <span>{upNext.title || 'Unknown Song'}</span>
+              <span style={{ fontSize: '1.8rem' }}>👤</span>
+              <span>{upNext.user_name || 'Guest'}</span>
             </div>
           </div>
         </div>
@@ -1085,13 +1174,11 @@ function TVModePageContent() {
                   #{item.position}
                 </div>
                 <div style={{ fontWeight: 'normal', wordBreak: 'break-word' }}>
-                  {item.song?.title || 'Unknown'}
+                  {item.title || 'Unknown'}
                 </div>
-                {item.user && (
-                  <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
-                    {item.user.display_name || 'Guest'}
-                  </div>
-                )}
+                <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
+                  {item.user_name || 'Guest'}
+                </div>
               </div>
               {isHost && item.status === 'pending' && (
                 <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, flexDirection: 'column' }}>

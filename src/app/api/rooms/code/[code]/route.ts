@@ -7,10 +7,10 @@ import type { Room } from '@/shared/types';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { code: string } }
+  { params }: { params: Promise<{ code: string }> }
 ) {
   try {
-    const { code } = params;
+    const { code } = await params;
 
     const { data: room, error } = await supabaseAdmin
       .from('kara_rooms')

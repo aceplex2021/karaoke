@@ -6,7 +6,7 @@ import { supabaseAdmin } from '@/server/lib/supabase';
 import type { JoinRoomRequest, Room, User } from '@/shared/types';
 
 /**
- * Join room (Phone mode)
+ * Join room (v3.5 + v4.0 approval mode support)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Add or update participant
+    // Check if already participant (e.g., host who just created room)
     const { data: existingParticipant } = await supabaseAdmin
       .from('kara_room_participants')
       .select('*')
@@ -100,11 +100,17 @@ export async function POST(request: NextRequest) {
         .update({ last_active_at: new Date().toISOString() })
         .eq('id', existingParticipant.id);
     } else {
-      // Add new participant
+      // Add new participant with v4.0 approval support
+      const isHost = room.host_id === user.id;
+      const needsApproval = room.approval_mode === 'approval' && !isHost;
+      
       await supabaseAdmin.from('kara_room_participants').insert({
         room_id: room.id,
         user_id: user.id,
-        role: 'participant',
+        user_name: display_name || 'Guest', // v4.0: Store user name
+        role: isHost ? 'host' : 'user', // v4.0: Host role support
+        status: needsApproval ? 'pending' : 'approved', // v4.0: Approval status
+        expires_at: needsApproval ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null, // v4.0: 15-min expiry
       });
     }
 
@@ -121,4 +127,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

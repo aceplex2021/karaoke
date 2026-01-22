@@ -13,6 +13,7 @@ export interface Room {
   current_entry_id: string | null; // Backend-controlled: current playing queue entry
   last_singer_id: string | null; // Round-robin cursor: last singer who had a turn
   queue_mode: 'round_robin' | 'fifo'; // Queue ordering mode
+  approval_mode?: 'auto' | 'approval'; // v4.0: Join approval mode
 }
 
 export interface User {
@@ -122,14 +123,22 @@ export interface QueueItem {
   room_id: string;
   song_id: string;
   user_id: string;
+  user_name: string; // Added for direct display
+  title: string; // Added for direct display
+  artist: string | null; // Added for direct display
   position: number;
   status: 'pending' | 'playing' | 'completed' | 'skipped';
   added_at: string;
   started_at: string | null;
   completed_at: string | null;
+  played_at: string | null;
   round_number: number;
   host_override: boolean;
   host_override_position: number | null;
+  // v4.0: YouTube support
+  source_type?: 'database' | 'youtube';
+  youtube_url?: string | null;
+  version_id?: string | null; // For database songs
   // Joined data
   song?: Song;
   user?: User;
@@ -167,9 +176,13 @@ export interface RoomParticipant {
   id: string;
   room_id: string;
   user_id: string;
+  user_name?: string; // Added for display
   joined_at: string;
   last_active_at: string;
-  role: 'participant' | 'host';
+  role: 'participant' | 'host' | 'tv' | 'user'; // v4.0: Added tv and user roles
+  status?: 'approved' | 'pending' | 'denied'; // v4.0: Approval status
+  approved_at?: string | null; // v4.0: When approved
+  expires_at?: string | null; // v4.0: Pending approval expiry
 }
 
 export interface CreateRoomRequest {
@@ -177,6 +190,7 @@ export interface CreateRoomRequest {
   host_fingerprint: string;
   host_display_name?: string;
   queue_mode?: 'round_robin' | 'fifo'; // Optional, defaults to 'fifo'
+  approval_mode?: 'auto' | 'approval'; // v4.0: Optional, defaults to 'auto'
 }
 
 export interface JoinRoomRequest {

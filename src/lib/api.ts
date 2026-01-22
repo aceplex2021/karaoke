@@ -154,6 +154,29 @@ export const api = {
     return result;
   },
 
+  async addYouTubeToQueue(data: {
+    room_id: string;
+    user_id: string;
+    youtube_url: string;
+    title?: string;
+  }): Promise<{ queueItem: QueueItem }> {
+    console.log('[api] addYouTubeToQueue request:', data);
+    const res = await fetch(`${API_BASE}/queue/add-youtube`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    console.log('[api] addYouTubeToQueue response status:', res.status);
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('[api] addYouTubeToQueue error:', errorText);
+      throw new Error(`Failed to add YouTube video: ${errorText}`);
+    }
+    const result = await res.json();
+    console.log('[api] addYouTubeToQueue success:', result);
+    return result;
+  },
+
   async removeQueueItem(queueItemId: string, userId: string): Promise<{ success: boolean; message: string }> {
     console.log('[api] removeQueueItem request:', { queueItemId, userId });
     const res = await fetch(`${API_BASE}/queue/item/${queueItemId}`, {

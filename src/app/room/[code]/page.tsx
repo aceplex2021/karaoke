@@ -8,6 +8,9 @@ import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomSt
 import { useToast } from '@/components/Toast';
 import { VersionCard } from '@/components/VersionCard';
 import { usePreview } from '@/contexts/PreviewContext';
+import { ApprovalQueue } from '@/components/ApprovalQueue';
+import { SearchRedirect } from '@/components/SearchRedirect';
+import { appConfig } from '@/lib/config';
 
 // ====================================
 // VERSION DISPLAY HELPERS
@@ -551,8 +554,9 @@ export default function RoomPage() {
   const [removingFromQueue, setRemovingFromQueue] = useState(false);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'history' | 'favorites'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'history' | 'favorites' | 'approval'>('search');
   const [showNameInput, setShowNameInput] = useState(false);
+  const [isHost, setIsHost] = useState(false);
   const [showConfirmRemove, setShowConfirmRemove] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null);
   const [history, setHistory] = useState<any[]>([]);
@@ -560,6 +564,8 @@ export default function RoomPage() {
   const [favorites, setFavorites] = useState<Song[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoriteSongIds, setFavoriteSongIds] = useState<Set<string>>(new Set());
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [addingYoutube, setAddingYoutube] = useState(false);
   
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -622,10 +628,22 @@ export default function RoomPage() {
       setRoom(roomData);
       setUser(userData);
       
+      // Check if user is host
+      const isUserHost = roomData.host_id === userData.id;
+      setIsHost(isUserHost);
+      console.log('[Room] User is host:', isUserHost);
+      
       // Ensure display name is stored (backend might have updated it)
       if (userData.display_name) {
         localStorage.setItem('user_display_name', userData.display_name);
       }
+
+      // Store room context for share-target (PWA YouTube sharing)
+      localStorage.setItem('current_room_id', roomData.id);
+      localStorage.setItem('current_room_code', roomData.room_code);
+      localStorage.setItem('user_id', userData.id);
+      localStorage.setItem('user_role', isUserHost ? 'host' : 'user');
+      console.log('[Room] Saved room context to localStorage for share-target');
 
       roomIdRef.current = roomData.id;
       
@@ -650,12 +668,29 @@ export default function RoomPage() {
     joinRoom(name);
   }, [joinRoom]);
 
-  // Always require name input when joining room
+  // Check if user is host and auto-join, otherwise show name input
   useEffect(() => {
     if (code) {
-      // Always show name input modal - name is required to join
-      setShowNameInput(true);
-      setLoading(false); // Don't show loading spinner while waiting for name
+      const userRole = localStorage.getItem('user_role');
+      const storedName = localStorage.getItem('user_display_name');
+      const storedRoomCode = localStorage.getItem('current_room_code');
+      
+      // Check if user is already in THIS specific room
+      const alreadyInThisRoom = storedRoomCode?.toUpperCase() === code.toUpperCase();
+      
+      // Auto-join if:
+      // 1. User is host (already provided name during creation)
+      // 2. User already joined this room (returning from share-target, etc.)
+      if (storedName && (userRole === 'host' || alreadyInThisRoom)) {
+        console.log('[Room] Auto-joining with stored name:', storedName, '(role:', userRole, ')');
+        setLoading(true);
+        joinRoom(storedName);
+      } else {
+        // First-time users need to provide their name
+        console.log('[Room] First visit, showing name input');
+        setShowNameInput(true);
+        setLoading(false);
+      }
     }
     
     // Cleanup on unmount
@@ -665,7 +700,7 @@ export default function RoomPage() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [code]);
+  }, [code, joinRoom]);
 
   // Fetch favorites
   const fetchFavorites = useCallback(async () => {
@@ -838,6 +873,73 @@ export default function RoomPage() {
       showError(errorMessage);
     } finally {
       setAddingToQueue(false);
+    }
+  };
+
+  /**
+   * Add YouTube video to queue via direct URL paste
+   */
+  const handleAddYouTubeUrl = async () => {
+    if (!room || !user) {
+      setError('Room or user not found. Please refresh the page.');
+      return;
+    }
+
+    const trimmedUrl = youtubeUrl.trim();
+    if (!trimmedUrl) {
+      showError('Please paste a YouTube URL');
+      return;
+    }
+
+    // Extract video ID from various YouTube URL formats
+    let videoId = '';
+    try {
+      const url = new URL(trimmedUrl);
+      
+      // youtube.com/watch?v=VIDEO_ID
+      if (url.hostname.includes('youtube.com') && url.searchParams.has('v')) {
+        videoId = url.searchParams.get('v') || '';
+      }
+      // youtu.be/VIDEO_ID
+      else if (url.hostname === 'youtu.be') {
+        videoId = url.pathname.slice(1); // Remove leading slash
+      }
+      
+      if (!videoId) {
+        showError('Invalid YouTube URL. Please use a valid youtube.com or youtu.be link.');
+        return;
+      }
+    } catch (err) {
+      showError('Invalid URL format. Please paste a valid YouTube link.');
+      return;
+    }
+
+    setAddingYoutube(true);
+    try {
+      console.log('[handleAddYouTubeUrl] Adding YouTube video:', { 
+        room_id: room.id, 
+        user_id: user.id, 
+        videoId,
+        url: trimmedUrl
+      });
+
+      await api.addYouTubeToQueue({
+        room_id: room.id,
+        user_id: user.id,
+        youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+        title: '', // Backend will fetch title
+      });
+
+      setError('');
+      success('YouTube video added to queue!');
+      setYoutubeUrl(''); // Clear input
+    } catch (err: any) {
+      console.error('[handleAddYouTubeUrl] Failed:', err);
+      const errorMessage = err.message || 'Failed to add YouTube video to queue';
+      setError(errorMessage);
+      showError(errorMessage);
+    } finally {
+      setAddingYoutube(false);
     }
   };
 
@@ -1067,68 +1169,136 @@ export default function RoomPage() {
         >
           ❤️ Favorites
         </button>
+        
+        {/* Host-only: Approval tab (v4.0) */}
+        {isHost && appConfig.features.hostApproval && room?.approval_mode === 'approval' && (
+          <button
+            onClick={() => setActiveTab('approval')}
+            style={{
+              flex: 1,
+              padding: '1rem',
+              background: activeTab === 'approval' ? '#0070f3' : 'transparent',
+              color: activeTab === 'approval' ? 'white' : '#333',
+              fontWeight: activeTab === 'approval' ? 'bold' : 'normal',
+            }}
+          >
+            ✅ Approval
+          </button>
+        )}
       </div>
 
       {/* Search Tab */}
       {activeTab === 'search' && (
         <div style={{ padding: '1rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <input
-              type="text"
-              className="input"
-              placeholder="Search by title or artist..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            />
-            <button className="btn btn-primary" onClick={handleSearch} disabled={searching} style={{ opacity: searching ? 0.6 : 1 }}>
-              {searching ? 'Searching...' : 'Search'}
-            </button>
-          </div>
-          <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
-            💡 Tip: Search by song title or artist name
-          </div>
-
-          {error && (
-            <div style={{ color: '#e00', marginBottom: '1rem', fontSize: '0.9rem' }}>
-              {error}
-            </div>
-          )}
-
-          {/* NEW: YouTube-like version grid */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: '16px',
-              padding: '16px 0',
-            }}
-          >
-            {searchResults.map((version) => (
-              <VersionCard
-                key={version.version_id}
-                version={version}
-                onAddToQueue={handleAddVersionToQueue}
-                isActive={activePreviewId === version.version_id}
-                onPreviewStart={setActivePreview}
-                onPreviewStop={() => setActivePreview(null)}
+          {/* v4.0 YouTube Mode: Redirect to YouTube */}
+          {appConfig.features.youtubeSearch && (
+            <div>
+              <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 'bold' }}>
+                🎤 Search for Songs on YouTube
+              </h3>
+              <SearchRedirect 
+                placeholder="Search for a karaoke song..."
+                buttonText="🔍 Search on YouTube"
+                showInstructions={true}
               />
-            ))}
-          </div>
 
-          {/* Empty states */}
-          {searchResults.length === 0 && searchQuery && !searching && (
-            <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>😕 No versions found</p>
-              <p style={{ fontSize: '0.9rem' }}>Try a different search term</p>
+              {/* YouTube URL Paste Box */}
+              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #eee' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '1rem', fontWeight: 'bold', color: '#666' }}>
+                  📋 Or Paste YouTube Link
+                </h3>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Paste YouTube URL here..."
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleAddYouTubeUrl()}
+                    disabled={addingYoutube}
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={handleAddYouTubeUrl} 
+                    disabled={addingYoutube || !youtubeUrl.trim()}
+                    style={{ 
+                      opacity: (addingYoutube || !youtubeUrl.trim()) ? 0.6 : 1,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {addingYoutube ? 'Adding...' : '+ Add to Queue'}
+                  </button>
+                </div>
+                <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
+                  💡 Copy a YouTube link from any app and paste it here
+                </p>
+              </div>
             </div>
           )}
 
-          {searchResults.length === 0 && !searchQuery && !searching && (
-            <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎤 Search for songs</p>
-              <p style={{ fontSize: '0.9rem' }}>Start typing to find karaoke tracks</p>
-            </div>
+          {/* v3.5 Database Mode: Database search */}
+          {appConfig.features.databaseSearch && (
+            <>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Search by title or artist..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                />
+                <button className="btn btn-primary" onClick={handleSearch} disabled={searching} style={{ opacity: searching ? 0.6 : 1 }}>
+                  {searching ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+              <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
+                💡 Tip: Search by song title or artist name
+              </div>
+
+              {error && (
+                <div style={{ color: '#e00', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                  {error}
+                </div>
+              )}
+
+              {/* Database search results grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                  gap: '16px',
+                  padding: '16px 0',
+                }}
+              >
+                {searchResults.map((version) => (
+                  <VersionCard
+                    key={version.version_id}
+                    version={version}
+                    onAddToQueue={handleAddVersionToQueue}
+                    isActive={activePreviewId === version.version_id}
+                    onPreviewStart={setActivePreview}
+                    onPreviewStop={() => setActivePreview(null)}
+                  />
+                ))}
+              </div>
+
+              {/* Empty states */}
+              {searchResults.length === 0 && searchQuery && !searching && (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
+                  <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>😕 No versions found</p>
+                  <p style={{ fontSize: '0.9rem' }}>Try a different search term</p>
+                </div>
+              )}
+
+              {searchResults.length === 0 && !searchQuery && !searching && (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
+                  <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>🎤 Search for songs</p>
+                  <p style={{ fontSize: '0.9rem' }}>Start typing to find karaoke tracks</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -1152,18 +1322,16 @@ export default function RoomPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
-                      {currentSong.song?.title}
+                      {currentSong.title}
                     </div>
-                    {currentSong.song?.artist && (
+                    {currentSong.artist && (
                       <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem' }}>
-                        {currentSong.song.artist}
+                        {currentSong.artist}
                       </div>
                     )}
-                    {currentSong.user && (
-                      <div style={{ fontSize: '0.85rem', color: '#999' }}>
-                        🎤 {currentSong.user.display_name || 'Guest'}
-                      </div>
-                    )}
+                    <div style={{ fontSize: '0.85rem', color: '#999' }}>
+                      🎤 {currentSong.user_name}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1188,18 +1356,16 @@ export default function RoomPage() {
                     (via round-robin)
                   </div>
                   <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
-                    {upNext.song?.title}
+                    {upNext.title}
                   </div>
-                  {upNext.song?.artist && (
+                  {upNext.artist && (
                     <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem' }}>
-                      {upNext.song.artist}
+                      {upNext.artist}
                     </div>
                   )}
-                  {upNext.user && (
-                    <div style={{ fontSize: '0.85rem', color: '#999' }}>
-                      🎤 {upNext.user.display_name || 'Guest'}
-                    </div>
-                  )}
+                  <div style={{ fontSize: '0.85rem', color: '#999' }}>
+                    🎤 {upNext.user_name}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1232,11 +1398,11 @@ export default function RoomPage() {
                         #{index + 1}
                       </div>
                       <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
-                        {item.song?.title}
+                        {item.title}
                       </div>
-                      {item.song?.artist && (
+                      {item.artist && (
                         <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
-                          {item.song.artist}
+                          {item.artist}
                         </div>
                       )}
                     </div>
@@ -1511,6 +1677,22 @@ export default function RoomPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Approval Tab (Host-only, v4.0) */}
+      {activeTab === 'approval' && isHost && room && (
+        <div style={{ padding: '1rem' }}>
+          <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
+            ✅ User Approval Queue
+          </h3>
+          
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#f0f8ff', borderRadius: '4px', fontSize: '0.9rem', color: '#666' }}>
+            💡 <strong>Tip:</strong> Users waiting for approval have 15 minutes before their request expires. 
+            Once approved, they can add songs to the queue.
+          </div>
+          
+          <ApprovalQueue roomId={room.id} hostId={room.host_id || user?.id || ''} />
         </div>
       )}
 

@@ -40,7 +40,7 @@ async function generateUniqueRoomCode(): Promise<string> {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as CreateRoomRequest;
-    const { room_name, host_fingerprint, host_display_name, queue_mode } = body;
+    const { room_name, host_fingerprint, host_display_name, queue_mode, approval_mode } = body;
 
     if (!room_name || !host_fingerprint) {
       return NextResponse.json(
@@ -54,6 +54,12 @@ export async function POST(request: NextRequest) {
     const selectedMode = queue_mode && validModes.includes(queue_mode) 
       ? queue_mode 
       : 'fifo'; // Default to FIFO to maintain current behavior
+
+    // Validate approval_mode (default to 'auto' if invalid or missing)
+    const validApprovalModes = ['auto', 'approval'];
+    const selectedApprovalMode = approval_mode && validApprovalModes.includes(approval_mode)
+      ? approval_mode
+      : 'auto'; // Default to auto for backward compatibility
 
     // Get or create user
     let { data: user } = await supabaseAdmin
@@ -96,6 +102,7 @@ export async function POST(request: NextRequest) {
         room_name,
         host_id: user.id,
         queue_mode: selectedMode, // Add queue mode
+        approval_mode: selectedApprovalMode, // v4.0: Add approval mode
       })
       .select()
       .single();
@@ -108,7 +115,9 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('kara_room_participants').insert({
       room_id: room.id,
       user_id: user.id,
+      user_name: host_display_name || 'Host',
       role: 'host',
+      status: 'approved', // v4.0: Host is always approved
     });
 
     return NextResponse.json({

@@ -7,10 +7,10 @@ import { supabaseAdmin } from '@/server/lib/supabase';
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { roomId: string; userId: string } }
+  { params }: { params: Promise<{ roomId: string; userId: string }> }
 ) {
   try {
-    const { roomId, userId } = params;
+    const { roomId, userId } = await params;
 
     const { data: history, error } = await supabaseAdmin
       .from('kara_song_history')

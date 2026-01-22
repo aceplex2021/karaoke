@@ -4,9 +4,143 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { getOrCreateFingerprint } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { CommercialOnly, PrivateOnly } from '@/components/FeatureToggle';
 
 export default function HomePage() {
   const router = useRouter();
+  
+  return (
+    <>
+      {/* v4.0 Commercial Mode - Simple 3-button interface */}
+      <CommercialOnly>
+        <V4LandingPage router={router} />
+      </CommercialOnly>
+
+      {/* v3.5 Private Mode - Original room creation interface */}
+      <PrivateOnly>
+        <V3LandingPage router={router} />
+      </PrivateOnly>
+    </>
+  );
+}
+
+/**
+ * v4.0 Landing Page (Commercial Mode)
+ * Simple 3-button interface for Host, TV, and User
+ */
+function V4LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
+  return (
+    <div style={{ 
+      minHeight: '100vh', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      padding: '1rem',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+    }}>
+      <div className="card" style={{ maxWidth: '500px', width: '100%', margin: '0 auto' }}>
+        <h1 style={{ 
+          fontSize: '2.5rem', 
+          marginBottom: '0.5rem', 
+          textAlign: 'center',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          fontWeight: 'bold'
+        }}>
+          🎤 Kara
+        </h1>
+        
+        <p style={{ 
+          textAlign: 'center', 
+          color: '#666', 
+          marginBottom: '2rem',
+          fontSize: '0.95rem'
+        }}>
+          YouTube Karaoke Queue Manager
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <button
+            className="btn btn-primary"
+            onClick={() => router.push('/create')}
+            style={{ 
+              width: '100%',
+              padding: '1.5rem',
+              fontSize: '1.1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem'
+            }}
+          >
+            <span style={{ fontSize: '1.5rem' }}>🎤</span>
+            <span>Create Room (Host)</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => router.push('/tv-setup')}
+            style={{ 
+              width: '100%',
+              padding: '1.5rem',
+              fontSize: '1.1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem'
+            }}
+          >
+            <span style={{ fontSize: '1.5rem' }}>📺</span>
+            <span>I'm a TV / Media Player</span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => router.push('/join')}
+            style={{ 
+              width: '100%',
+              padding: '1.5rem',
+              fontSize: '1.1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem'
+            }}
+          >
+            <span style={{ fontSize: '1.5rem' }}>👥</span>
+            <span>Join Room (User)</span>
+          </button>
+        </div>
+
+        <div style={{ 
+          marginTop: '2rem', 
+          paddingTop: '2rem', 
+          borderTop: '1px solid #eee', 
+          fontSize: '0.85rem', 
+          color: '#666',
+          textAlign: 'center'
+        }}>
+          <p style={{ marginBottom: '0.5rem' }}>
+            <strong>Host:</strong> Create and manage your karaoke party
+          </p>
+          <p style={{ marginBottom: '0.5rem' }}>
+            <strong>TV:</strong> Display and play YouTube videos
+          </p>
+          <p>
+            <strong>User:</strong> Join with room code and add songs
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * v3.5 Landing Page (Private Mode)
+ * Original room creation interface with database mode
+ */
+function V3LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
   const [roomName, setRoomName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [queueMode, setQueueMode] = useState<'round_robin' | 'fifo'>('fifo');

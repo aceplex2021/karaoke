@@ -38,10 +38,10 @@ function extractBasename(storagePath: string): string {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { roomId: string } }
+  { params }: { params: Promise<{ roomId: string }> }
 ) {
   try {
-    const { roomId } = params;
+    const { roomId } = await params;
     
     // 1. Get room metadata
     const { data: room, error: roomError } = await supabaseAdmin
@@ -109,11 +109,25 @@ export async function GET(
           media_url
         } : null;
         
+        const user = data.kara_users || null;
+        
+        // Flatten display fields
+        const title = data.source_type === 'youtube' 
+          ? (data.metadata?.title || data.youtube_url || 'YouTube Video')
+          : (version?.title_display || 'Unknown');
+        const artist = data.source_type === 'youtube'
+          ? 'YouTube'
+          : (version?.artist_name || null);
+        const user_name = user?.display_name || user?.username || 'Anonymous';
+        
         currentSong = {
           ...data,
+          title,
+          artist,
+          user_name,
           version,
           song,
-          user: data.kara_users || null
+          user
         } as QueueItem;
       }
     }
@@ -157,14 +171,10 @@ export async function GET(
       console.error('[state] Queue query error:', queueError);
     }
     
-    console.log('[state] Queue query result:', {
+    // Log before mapping
+    console.log('[state] Queue raw data:', {
       roomId,
-      count: queueData?.length || 0,
-      firstItem: queueData?.[0] ? {
-        id: queueData[0].id,
-        version: queueData[0].kara_versions,
-        files: queueData[0].kara_versions?.kara_files
-      } : null
+      count: queueDataRaw?.length || 0,
     });
     
     // Map queue items for backward compatibility
@@ -197,13 +207,42 @@ export async function GET(
         media_url
       } : null;
       
+      const user = item.kara_users || null;
+      
+      // Flatten display fields for easier access (QueueItem interface expects these)
+      // For YouTube: extract from metadata JSON or fallback to URL
+      // For database: use version info
+      const title = item.source_type === 'youtube' 
+        ? (item.metadata?.title || item.youtube_url || 'YouTube Video')
+        : (version?.title_display || 'Unknown');
+      const artist = item.source_type === 'youtube'
+        ? 'YouTube'
+        : (version?.artist_name || null);
+      const user_name = user?.display_name || user?.username || 'Anonymous';
+      
       return {
         ...item,
+        title,
+        artist,
+        user_name,
         version,
         song,
-        user: item.kara_users || null
+        user
       };
     }) as QueueItem[];
+    
+    // Log after mapping
+    console.log('[state] Queue mapped data:', {
+      count: queue.length,
+      firstItem: queue[0] ? {
+        id: queue[0].id,
+        title: queue[0].title,
+        artist: queue[0].artist,
+        user_name: queue[0].user_name,
+        source_type: queue[0].source_type,
+        youtube_url: queue[0].youtube_url
+      } : null
+    });
     
     // 4. Get next song (first in queue for upNext display)
     const upNext = queue.length > 0 ? queue[0] : null;
