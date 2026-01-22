@@ -6,8 +6,9 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
 
 export default function JoinRoomPage() {
   const router = useRouter();
@@ -15,6 +16,50 @@ export default function JoinRoomPage() {
   const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkingRoom, setCheckingRoom] = useState(true); // v4.5.1: Check for existing room
+
+  // v4.5.1: Auto-rejoin last room if still active
+  useEffect(() => {
+    const checkLastRoom = async () => {
+      try {
+        const storedRoomCode = localStorage.getItem('current_room_code');
+        const storedUserName = localStorage.getItem('user_display_name');
+        const storedUserId = localStorage.getItem('user_id');
+        
+        if (!storedRoomCode || !storedUserName || !storedUserId) {
+          console.log('[Join] No stored room - showing join form');
+          setCheckingRoom(false);
+          return;
+        }
+        
+        console.log('[Join] Checking if last room is still active:', storedRoomCode);
+        
+        // Verify room still exists
+        const roomData = await api.getRoomByCode(storedRoomCode);
+        
+        if (roomData && roomData.room) {
+          console.log('[Join] ✅ Last room still active - auto-rejoining:', storedRoomCode);
+          // Auto-redirect to last room
+          router.push(`/room/${storedRoomCode}`);
+          return;
+        } else {
+          console.log('[Join] Last room not found or expired - showing join form');
+          // Clear stale data
+          localStorage.removeItem('current_room_code');
+          localStorage.removeItem('current_room_id');
+          setCheckingRoom(false);
+        }
+      } catch (error) {
+        console.error('[Join] Error checking last room:', error);
+        // Clear stale data on error
+        localStorage.removeItem('current_room_code');
+        localStorage.removeItem('current_room_id');
+        setCheckingRoom(false);
+      }
+    };
+    
+    checkLastRoom();
+  }, [router]);
 
   const handleJoin = () => {
     if (!roomCode.trim()) {
@@ -35,6 +80,25 @@ export default function JoinRoomPage() {
     // Navigate to room
     router.push(`/room/${roomCode.toUpperCase()}`);
   };
+  
+  // v4.5.1: Show loading while checking for last room
+  if (checkingRoom) {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        padding: '1rem',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+      }}>
+        <div className="card" style={{ maxWidth: '500px', width: '100%', margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎤</div>
+          <div style={{ fontSize: '1.2rem', color: '#666' }}>Checking for active room...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ 

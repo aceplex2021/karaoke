@@ -1979,6 +1979,51 @@ export default function RoomPage() {
                         {favoriteSongIds.has(favoriteId) ? '❤️' : '🤍'}
                       </button>
                       <button
+                        onClick={async () => {
+                          if (!room || !user || !confirm(`Remove "${item.song?.title || 'this song'}" from your history?`)) return;
+                          
+                          setHistoryLoading(true);
+                          try {
+                            const sourceType = isYouTube ? 'youtube' : 'database';
+                            const response = await fetch(`/api/users/${user.id}/history/${item.id}?source_type=${sourceType}`, {
+                              method: 'DELETE',
+                            });
+                            
+                            if (!response.ok) {
+                              throw new Error('Failed to delete history entry');
+                            }
+                            
+                            console.log('[History] Deleted history entry:', item.id);
+                            // Refresh history list
+                            await fetchHistory();
+                            success('Song removed from history');
+                          } catch (error) {
+                            console.error('[History] Delete error:', error);
+                            showError('Failed to remove song from history');
+                          } finally {
+                            setHistoryLoading(false);
+                          }
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.3rem',
+                          cursor: 'pointer',
+                          padding: '0.25rem',
+                          transition: 'transform 0.2s',
+                          color: '#dc3545',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                        title="Remove from history"
+                      >
+                        🗑️
+                      </button>
+                      <button
                         className="btn btn-sm"
                         onClick={async () => {
                           if (!room || !user) return;

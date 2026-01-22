@@ -67,6 +67,7 @@ function TVModePageContent() {
   const [showSidebar, setShowSidebar] = useState(false); // Mobile sidebar toggle
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [showUpNextBanner, setShowUpNextBanner] = useState(false); // v4.5.1: Stable banner visibility
   
   // Prevent stale refresh overwrites
   const requestIdRef = useRef<number>(0);
@@ -186,6 +187,26 @@ function TVModePageContent() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
+
+  // v4.5.1: Update Up Next banner visibility (prevent flickering by only updating on threshold cross)
+  useEffect(() => {
+    if (!upNext || !currentSong || needsUserInteraction || duration <= 0 || currentTime <= 0) {
+      if (showUpNextBanner) {
+        setShowUpNextBanner(false);
+      }
+      return;
+    }
+    
+    const timeRemaining = duration - currentTime;
+    const shouldShow = timeRemaining > 0 && timeRemaining <= 60;
+    
+    if (shouldShow !== showUpNextBanner) {
+      setShowUpNextBanner(shouldShow);
+      if (shouldShow) {
+        console.log('[tv] 🎵 Up Next banner activated - time remaining:', Math.round(timeRemaining), 's');
+      }
+    }
+  }, [currentTime, duration, upNext, currentSong, needsUserInteraction, showUpNextBanner]);
 
   // Auto-hide sidebar after 10 seconds of inactivity
   useEffect(() => {
@@ -950,8 +971,8 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Up Next Flying Banner - Scrolling marquee at top center (only shows in last 60 seconds) */}
-      {upNext && currentSong && !needsUserInteraction && duration > 0 && currentTime > 0 && (duration - currentTime) <= 60 && (duration - currentTime) >= 0 && (
+      {/* Up Next Flying Banner - Scrolling marquee at top center (v4.5.1: stable visibility, no flickering) */}
+      {showUpNextBanner && upNext && (
         <div
           style={{
             position: 'absolute',
@@ -1265,6 +1286,48 @@ function TVModePageContent() {
         </div>
       )}
       </div>
+
+      {/* Skip Next Button - Always visible (v4.5.1) - Positioned below display badge and song title */}
+      {(currentSong || queue.length > 0) && (
+        <button
+          onClick={handleManualAdvance}
+          disabled={!currentSong && queue.length === 0}
+          style={{
+            position: 'absolute',
+            top: '7.5rem',
+            left: '1rem',
+            zIndex: 600,
+            background: (currentSong || queue.length > 0) ? 'rgba(0,0,0,0.8)' : 'rgba(128,128,128,0.5)',
+            color: 'white',
+            border: '2px solid rgba(255,255,255,0.3)',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: 'bold',
+            cursor: (currentSong || queue.length > 0) ? 'pointer' : 'not-allowed',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            minHeight: '48px',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            if (currentSong || queue.length > 0) {
+              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.95)';
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(0,0,0,0.8)';
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+          title="Skip to next song"
+        >
+          <span style={{ fontSize: '1.2rem' }}>⏭️</span>
+          <span>Skip Next</span>
+        </button>
+      )}
 
       {/* Mobile Toggle Button - Only visible on mobile/tablet */}
       <button
