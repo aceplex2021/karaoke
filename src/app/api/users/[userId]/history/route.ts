@@ -4,9 +4,10 @@ import { supabaseAdmin } from '@/server/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/users/[userId]/history?room_id=xxx
- * Get user's song history (optionally filtered by room)
+ * GET /api/users/[userId]/history
+ * Get user's song history (user-global, not room-specific)
  * v4.0: Includes both database and YouTube songs
+ * v4.5.2: History is now user-global across all rooms
  * Returns last 12 months by default
  */
 export async function GET(
@@ -15,17 +16,15 @@ export async function GET(
 ) {
   try {
     const { userId } = params;
-    const { searchParams } = new URL(request.url);
-    const roomId = searchParams.get('room_id');
     
     // Calculate 12 months ago
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
     
-    console.log('[users/history] Fetching history for user:', userId, 'room:', roomId || 'all', 'since:', twelveMonthsAgo.toISOString());
+    console.log('[users/history] Fetching user-global history for user:', userId, 'since:', twelveMonthsAgo.toISOString());
     
-    // Fetch database song history (v3.5)
-    let dbQuery = supabaseAdmin
+    // Fetch database song history (v3.5) - v4.5.2: No room filter
+    const dbQuery = supabaseAdmin
       .from('kara_song_history')
       .select(`
         *,
@@ -43,10 +42,6 @@ export async function GET(
       .gte('sung_at', twelveMonthsAgo.toISOString())
       .order('sung_at', { ascending: false });
     
-    if (roomId) {
-      dbQuery = dbQuery.eq('room_id', roomId);
-    }
-    
     const { data: dbHistory, error: dbError } = await dbQuery;
     
     if (dbError) {
@@ -54,10 +49,10 @@ export async function GET(
       throw dbError;
     }
     
-    // Fetch YouTube song history (v4.0)
+    // Fetch YouTube song history (v4.0) - v4.5.2: No room filter
     // Note: advance_playback sets completed_at, not played_at
     // Include ALL completed songs with youtube_url (both new with source_type='youtube' and old without source_type)
-    let youtubeQuery = supabaseAdmin
+    const youtubeQuery = supabaseAdmin
       .from('kara_queue')
       .select('id, room_id, user_id, youtube_url, metadata, completed_at, added_at, source_type, version_id')
       .eq('user_id', userId)
@@ -66,10 +61,6 @@ export async function GET(
       .not('youtube_url', 'is', null) // Must have youtube_url to be a YouTube song
       .gte('completed_at', twelveMonthsAgo.toISOString())
       .order('completed_at', { ascending: false });
-    
-    if (roomId) {
-      youtubeQuery = youtubeQuery.eq('room_id', roomId);
-    }
     
     const { data: youtubeHistory, error: youtubeError } = await youtubeQuery;
     

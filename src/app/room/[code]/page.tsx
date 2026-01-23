@@ -802,17 +802,19 @@ export default function RoomPage() {
   }, [user, favoriteSongIds, success, showError]);
 
   // Fetch history when history tab is activated
+  // v4.5.2: Fetch user-global history (not room-specific)
   const fetchHistory = useCallback(async () => {
-    if (!user || !room) return;
+    if (!user) return;
     
     setHistoryLoading(true);
     try {
-      // Fetch both history and favorites
+      // Fetch both history and favorites (user-global)
       const [{ history: historyData }, { favorites: favoritesData }] = await Promise.all([
-        api.getUserHistory(user.id, room.id),
+        api.getUserHistory(user.id), // No room filter - user-global
         api.getUserFavorites(user.id),
       ]);
       setHistory(historyData || []);
+      console.log('[Room] Fetched user-global history:', historyData.length, 'entries');
       // Update favoriteSongIds for heart icon display
       const favoriteIds = new Set(favoritesData.map((song: Song) => song.id));
       setFavoriteSongIds(favoriteIds);
@@ -822,7 +824,7 @@ export default function RoomPage() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [user, room, showError]);
+  }, [user, showError]);
 
   const handleSearch = async () => {
     if (!room) return;

@@ -328,10 +328,9 @@ export const api = {
     return res.json();
   },
 
-  async getUserHistory(userId: string, roomId?: string): Promise<{ history: any[] }> {
-    const url = roomId 
-      ? `${API_BASE}/users/${userId}/history?room_id=${roomId}`
-      : `${API_BASE}/users/${userId}/history`;
+  // v4.5.2: History is now user-global (not room-specific)
+  async getUserHistory(userId: string): Promise<{ history: any[] }> {
+    const url = `${API_BASE}/users/${userId}/history`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch history');
     return res.json();
