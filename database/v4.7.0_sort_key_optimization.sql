@@ -436,16 +436,18 @@ CREATE OR REPLACE FUNCTION calculate_round_robin_position(
 ) RETURNS NUMERIC(20, 10) AS $$
 DECLARE
   v_user_song_count INTEGER;
-  v_new_song_count INTEGER;
-  v_insert_after_sort_key NUMERIC(20, 10);
-  v_next_song_sort_key NUMERIC(20, 10);
-  v_max_sort_key NUMERIC(20, 10);
+  v_round_number INTEGER;
+  v_songs_in_round INTEGER;
+  v_position_in_round INTEGER;
+  v_new_sort_key NUMERIC(20, 10);
 BEGIN
-  -- v4.7.6: TRUE FAIR round-robin - nobody sings twice until everyone sings once
-  -- Insert based on per-user song count, not round numbers
-  -- Example: Host(2 songs), Samsung(1 song) → Samsung adds → Host-1, Samsung-1, Host-2, Samsung-2
+  -- v4.8.0: Option B - Clear round boundaries using multiplication
+  -- Formula: sort_key = (round_number - 1) * 1000000 + position_within_round * 1000
+  -- Round 1: 1000-999999, Round 2: 1000000-1999999, Round 3: 2000000-2999999
+  -- This ensures rounds NEVER overlap in sort order
   
   -- Step 1: Count how many pending songs this user currently has
+  -- This determines which round the new song goes into
   SELECT COUNT(*) INTO v_user_song_count
   FROM kara_queue
   WHERE room_id = p_room_id
@@ -453,52 +455,30 @@ BEGIN
     AND status = 'pending';
   
   -- After adding, user will have this many songs
-  v_new_song_count := v_user_song_count + 1;
+  -- This is the round number for the new song
+  v_round_number := v_user_song_count + 1;
   
-  -- Step 2: Find insertion point
-  -- Insert AFTER the last song of any user who has <= v_user_song_count songs
-  -- This ensures we don't cut ahead of users with fewer or equal songs
+  -- Step 2: Count how many songs are already in this round
+  -- We need to find all songs where round_number = v_round_number
+  SELECT COUNT(*) INTO v_songs_in_round
+  FROM kara_queue
+  WHERE room_id = p_room_id
+    AND status = 'pending'
+    AND round_number = v_round_number;
   
-  WITH user_song_counts AS (
-    SELECT 
-      user_id,
-      COUNT(*) as song_count,
-      MAX(sort_key) as last_sort_key
-    FROM kara_queue
-    WHERE room_id = p_room_id
-      AND status = 'pending'
-    GROUP BY user_id
-  )
-  SELECT MAX(last_sort_key) INTO v_insert_after_sort_key
-  FROM user_song_counts
-  WHERE song_count <= v_user_song_count;
+  -- The new song will be positioned after existing songs in this round
+  v_position_in_round := v_songs_in_round + 1;
   
-  IF v_insert_after_sort_key IS NOT NULL THEN
-    -- Found users with <= count, insert after their last song
-    -- Check if there's a song after this position
-    SELECT MIN(sort_key) INTO v_next_song_sort_key
-    FROM kara_queue
-    WHERE room_id = p_room_id
-      AND status = 'pending'
-      AND sort_key > v_insert_after_sort_key;
-    
-    IF v_next_song_sort_key IS NOT NULL THEN
-      -- Insert between
-      RETURN (v_insert_after_sort_key + v_next_song_sort_key) / 2.0;
-    ELSE
-      -- No songs after, add to end
-      RETURN v_insert_after_sort_key + 1000.0;
-    END IF;
-  ELSE
-    -- This is the first song in the room, or everyone has more songs than this user
-    -- Add to end of queue
-    SELECT COALESCE(MAX(sort_key), 0) INTO v_max_sort_key
-    FROM kara_queue
-    WHERE room_id = p_room_id
-      AND status = 'pending';
-    
-    RETURN v_max_sort_key + 1000.0;
-  END IF;
+  -- Step 3: Calculate sort_key using clear round boundaries
+  -- Formula: (round_number - 1) * 1,000,000 + position_within_round * 1,000
+  -- Examples:
+  --   Round 1, Position 1: (1-1)*1000000 + 1*1000 = 1000
+  --   Round 1, Position 2: (1-1)*1000000 + 2*1000 = 2000
+  --   Round 2, Position 1: (2-1)*1000000 + 1*1000 = 1001000
+  --   Round 2, Position 2: (2-1)*1000000 + 2*1000 = 1002000
+  v_new_sort_key := (v_round_number - 1)::NUMERIC * 1000000.0 + v_position_in_round::NUMERIC * 1000.0;
+  
+  RETURN v_new_sort_key;
 END;
 $$ LANGUAGE plpgsql;
 

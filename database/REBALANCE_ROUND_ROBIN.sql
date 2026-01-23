@@ -10,13 +10,17 @@
 -- Step 1: Find your room_id (if you don't know it)
 -- SELECT id, room_code, room_name FROM kara_rooms WHERE room_code = 'YOUR_ROOM_CODE';
 
--- Step 2: Rebalance the queue for TRUE FAIR round-robin
--- Algorithm: Distribute songs so users alternate fairly
+-- Step 2: Rebalance the queue for TRUE FAIR round-robin (v4.8.0 - Option B)
+-- Algorithm: Use clear round boundaries with multiplication
+--   Round 1: sort_key 1000-999999
+--   Round 2: sort_key 1000000-1999999
+--   Round 3: sort_key 2000000-2999999
+-- This ensures rounds NEVER overlap in sort order
 BEGIN;
 
 WITH user_songs AS (
   -- Number each user's songs (1st, 2nd, 3rd, etc.)
-  -- v4.7.7: Use added_at, NOT sort_key, to determine original add order
+  -- Use added_at to determine original add order
   SELECT 
     id,
     user_id,
@@ -29,17 +33,27 @@ WITH user_songs AS (
 rebalanced AS (
   SELECT 
     id,
-    user_song_num, -- This is the CORRECT round number!
-    -- Group by song number: all 1st songs, then all 2nd songs, etc.
-    -- v4.7.8: Within each round, order by added_at (who added first)
-    -- Result: User1-Song1, User2-Song1, User3-Song1 (by who added first), then Round 2, etc.
-    (ROW_NUMBER() OVER (ORDER BY user_song_num ASC, added_at ASC))::NUMERIC * 1000.0 as new_sort_key
+    user_song_num as round_number,
+    added_at,
+    -- v4.8.0: Option B - Clear round boundaries using multiplication
+    -- Formula: sort_key = (round_number - 1) * 1000000 + position_within_round * 1000
+    -- Round 1 songs: 1000-999999
+    -- Round 2 songs: 1000000-1999999
+    -- Round 3 songs: 2000000-2999999
+    -- This ensures Round 1 < Round 2 < Round 3 ALWAYS
+    (
+      (user_song_num - 1)::NUMERIC * 1000000.0 + 
+      (ROW_NUMBER() OVER (
+        PARTITION BY user_song_num 
+        ORDER BY added_at ASC
+      ))::NUMERIC * 1000.0
+    ) as new_sort_key
   FROM user_songs
 )
 UPDATE kara_queue q
 SET 
   sort_key = r.new_sort_key,
-  round_number = r.user_song_num  -- Fix round numbers!
+  round_number = r.round_number  -- v4.8.0: Fixed round numbers
 FROM rebalanced r
 WHERE q.id = r.id;
 

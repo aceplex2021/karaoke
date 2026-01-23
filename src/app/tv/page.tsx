@@ -80,6 +80,12 @@ function TVModePageContent() {
   const realtimeChannelRef = useRef<any>(null); // v4.4: Supabase Realtime channel
   const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
   const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
+  const reconnectAttemptsRef = useRef(0); // v4.8.0: Real-time reconnection attempts counter
+  
+  // v4.8.0: Real-time constants
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAY_MS = 5000; // 5 seconds between reconnection attempts
+  const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds (slower polling for fallback)
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -172,6 +178,8 @@ function TVModePageContent() {
         supabase.removeChannel(realtimeChannelRef.current);
         realtimeChannelRef.current = null;
       }
+      // v4.8.0: Reset reconnect attempts
+      reconnectAttemptsRef.current = 0;
     };
   }, [codeParam, roomIdParam]);
 
@@ -187,13 +195,11 @@ function TVModePageContent() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // v4.5.3: Reset banner and time when song changes to prevent flickering/stuck state
+  // v4.8.0: Reset banner when UP NEXT changes (time/duration handled by player callbacks)
   useEffect(() => {
     if (upNext?.id) {
-      console.log('[tv] 🔄 Song changed - resetting banner state for upNext:', upNext.id);
+      console.log('[tv] 🔄 Up next changed - resetting banner for:', upNext.id);
       setShowUpNextBanner(false);
-      setCurrentTime(0);
-      setDuration(0);
     }
   }, [upNext?.id]);
 
@@ -324,30 +330,75 @@ function TVModePageContent() {
         
         if (status === 'SUBSCRIBED') {
           console.log('[tv] ✅ Realtime connected (room + queue)');
+          // Stop any fallback polling if it was running
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          // Reset reconnect attempts on successful connection
+          reconnectAttemptsRef.current = 0;
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('[tv] ❌ Realtime failed, falling back to polling');
-          setUseRealtime(false);
-          startPolling(roomId);
+          console.error('[tv] ❌ Realtime connection failed');
+          // v4.8.0: Attempt reconnection with retry logic
+          attemptRealtimeReconnect(roomId);
         }
       });
     
     realtimeChannelRef.current = channel;
   }, [refreshState]);
 
-  const startPolling = useCallback((roomId: string) => {
-    // Don't start if already polling
-    if (pollingIntervalRef.current) {
+  /**
+   * v4.8.0: Attempt real-time reconnection with retry logic
+   */
+  const attemptRealtimeReconnect = useCallback((roomId: string) => {
+    reconnectAttemptsRef.current += 1;
+    
+    if (reconnectAttemptsRef.current > MAX_RECONNECT_ATTEMPTS) {
+      console.error('[tv] Max reconnection attempts reached. Falling back to polling.');
+      // After 5 retries, gracefully degrade to slower polling
+      setUseRealtime(false);
+      startPolling(roomId, FALLBACK_POLLING_INTERVAL);
       return;
     }
     
-    console.log('[tv] Starting polling (2.5s interval)');
+    console.log(`[tv] Attempting real-time reconnection (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+    
+    setTimeout(() => {
+      // Clean up old channel
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      
+      // Retry real-time subscription
+      subscribeToRoom(roomId);
+    }, RECONNECT_DELAY_MS);
+  }, [subscribeToRoom]);
+
+  /**
+   * Start polling room state (fallback mode)
+   * v4.8.0: Updated to accept custom interval parameter
+   */
+  const startPolling = useCallback((roomId: string, interval: number = FALLBACK_POLLING_INTERVAL) => {
+    // Stop any existing polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    
+    console.log(`[tv] Starting polling fallback (${interval}ms interval)`);
+    
+    // Initial fetch
+    refreshState(roomId);
+    
+    // Start polling with specified interval
     pollingIntervalRef.current = setInterval(() => {
       const currentRoomId = roomIdRef.current;
       if (currentRoomId) {
         console.log('[tv] Polling refreshState');
         refreshState(currentRoomId);
       }
-    }, 2500); // 2.5 seconds
+    }, interval);
   }, [refreshState]);
 
   const loadRoom = async (roomId: string) => {
@@ -402,10 +453,13 @@ function TVModePageContent() {
       }
       
       // v4.4: Use Realtime subscription with polling fallback
+      // v4.8.0: Reset reconnect attempts on room load
+      reconnectAttemptsRef.current = 0;
+      
       if (useRealtime) {
         subscribeToRoom(roomId);
       } else {
-        startPolling(roomId);
+        startPolling(roomId, FALLBACK_POLLING_INTERVAL);
       }
       
       setLoading(false);

@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
 import { useToast } from '@/components/Toast';
@@ -569,9 +571,19 @@ export default function RoomPage() {
   const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
   const [clipboardYouTube, setClipboardYouTube] = useState<{ url: string; title: string } | null>(null); // v4.3: Detected YouTube URL from clipboard
   
+  // v4.8.0: Real-time subscription state
+  const [useRealtime, setUseRealtime] = useState(true);
+  
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const approvalCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Polling for approval status
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null); // v4.8.0: Real-time channel
+  const reconnectAttemptsRef = useRef(0); // v4.8.0: Reconnection attempts counter
+  
+  // v4.8.0: Real-time constants
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAY_MS = 5000; // 5 seconds between reconnection attempts
+  const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds (slower polling for fallback)
   
   // Toast notifications
   const { success, error: showError, ToastContainer } = useToast();
@@ -599,23 +611,123 @@ export default function RoomPage() {
   }, []);
 
   /**
-   * Start polling room state
-   * Polls refreshRoomState every 2.5 seconds
+   * v4.8.0: Subscribe to real-time updates for room and queue
    */
-  const startPolling = useCallback((roomId: string) => {
-    // Don't start if already polling
-    if (pollingIntervalRef.current) {
+  const subscribeToRoom = useCallback((roomId: string) => {
+    // Unsubscribe from previous channel if exists
+    if (realtimeChannelRef.current) {
+      console.log('[room] Unsubscribing from previous real-time channel');
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+    }
+
+    console.log('[room] Setting up real-time subscription for room:', roomId);
+    
+    const channel = supabase
+      .channel(`room-${roomId}`)
+      // Subscribe to room metadata changes
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'kara_rooms',
+          filter: `id=eq.${roomId}`
+        },
+        (payload) => {
+          console.log('[room] Real-time: Room updated', payload);
+          refreshRoomState(roomId);
+        }
+      )
+      // Subscribe to queue changes (INSERT, UPDATE, DELETE)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // All events
+          schema: 'public',
+          table: 'kara_queue',
+          filter: `room_id=eq.${roomId}`
+        },
+        (payload) => {
+          console.log('[room] Real-time: Queue updated', payload.eventType, payload);
+          refreshRoomState(roomId);
+        }
+      )
+      .subscribe((status) => {
+        console.log('[room] Real-time subscription status:', status);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('[room] ✅ Real-time connected');
+          // Stop any fallback polling if it was running
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          // Reset reconnect attempts on successful connection
+          reconnectAttemptsRef.current = 0;
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error('[room] ❌ Real-time connection failed');
+          // Attempt reconnection with retry logic
+          attemptRealtimeReconnect(roomId);
+        }
+      });
+    
+    realtimeChannelRef.current = channel;
+  }, [refreshRoomState]);
+
+  /**
+   * v4.8.0: Attempt real-time reconnection with retry logic
+   */
+  const attemptRealtimeReconnect = useCallback((roomId: string) => {
+    reconnectAttemptsRef.current += 1;
+    
+    if (reconnectAttemptsRef.current > MAX_RECONNECT_ATTEMPTS) {
+      console.error('[room] Max reconnection attempts reached. Falling back to polling.');
+      // After 5 retries, gracefully degrade to slower polling
+      setUseRealtime(false);
+      startPolling(roomId, FALLBACK_POLLING_INTERVAL);
+      showError('Using slower updates. Refresh page for better experience.');
       return;
     }
     
-    console.log('[room] Starting polling (2.5s interval)');
+    console.log(`[room] Attempting real-time reconnection (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
+    
+    setTimeout(() => {
+      // Clean up old channel
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      
+      // Retry real-time subscription
+      subscribeToRoom(roomId);
+    }, RECONNECT_DELAY_MS);
+  }, [subscribeToRoom, showError]);
+
+  /**
+   * Start polling room state (fallback mode)
+   * v4.8.0: Updated to accept custom interval parameter
+   */
+  const startPolling = useCallback((roomId: string, interval: number = FALLBACK_POLLING_INTERVAL) => {
+    // Stop any existing polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    
+    console.log(`[room] Starting polling fallback (${interval}ms interval)`);
+    
+    // Initial fetch
+    refreshRoomState(roomId);
+    
+    // Start polling with specified interval
     pollingIntervalRef.current = setInterval(() => {
       const currentRoomId = roomIdRef.current;
       if (currentRoomId) {
         console.log('[room] Polling refreshRoomState');
         refreshRoomState(currentRoomId);
       }
-    }, 2500); // 2.5 seconds
+    }, interval);
   }, [refreshRoomState]);
 
   /**
@@ -701,14 +813,18 @@ export default function RoomPage() {
       // Initial load of room state
       await refreshRoomState(roomData.id);
 
-      // Start polling
-      startPolling(roomData.id);
+      // v4.8.0: Start real-time subscription (or fallback to polling)
+      if (useRealtime) {
+        subscribeToRoom(roomData.id);
+      } else {
+        startPolling(roomData.id, FALLBACK_POLLING_INTERVAL);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to join room');
     } finally {
       setLoading(false);
     }
-  }, [code, refreshRoomState, startPolling]);
+  }, [code, refreshRoomState, subscribeToRoom, startPolling, useRealtime]);
 
   const handleNameConfirm = useCallback((name: string) => {
     // Store name in localStorage
@@ -746,10 +862,20 @@ export default function RoomPage() {
     
     // Cleanup on unmount
     return () => {
+      // v4.8.0: Cleanup polling
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
       }
+      
+      // v4.8.0: Cleanup real-time
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      
+      // v4.8.0: Reset reconnect attempts
+      reconnectAttemptsRef.current = 0;
     };
   }, [code, joinRoom]);
 

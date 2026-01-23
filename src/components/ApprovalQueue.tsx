@@ -44,6 +44,9 @@ export function ApprovalQueue({ roomId, hostId, onUpdate, onNewUser }: ApprovalQ
   const seenUserIdsRef = useRef<Set<string>>(new Set());
   const hasFirstPollRef = useRef<boolean>(false); // Track if first poll completed (v4.4)
   const realtimeChannelRef = useRef<any>(null); // v4.4.1: Realtime channel
+  
+  // v4.8.0: Fallback polling interval
+  const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds
 
   // Fetch all participants (v4.4.1 - useCallback to prevent stale closures in Realtime)
   const fetchParticipants = useCallback(async () => {
@@ -315,13 +318,11 @@ export function ApprovalQueue({ roomId, hostId, onUpdate, onNewUser }: ApprovalQ
     // Initial fetch
     fetchParticipants();
 
-    // v4.4.1: Use Realtime if enabled, otherwise poll
+    // v4.8.0: Use Realtime if enabled, otherwise poll (no backup polling)
     if (useRealtime) {
       subscribeToParticipants();
-      // Still poll every 10s as backup (much slower than before)
-      const backupInterval = setInterval(() => fetchParticipants(), 10000);
+      // No backup polling - trust real-time fully
       return () => {
-        clearInterval(backupInterval);
         if (realtimeChannelRef.current) {
           console.log('[ApprovalQueue] Cleaning up Realtime subscription');
           supabase.removeChannel(realtimeChannelRef.current);
@@ -329,8 +330,8 @@ export function ApprovalQueue({ roomId, hostId, onUpdate, onNewUser }: ApprovalQ
         }
       };
     } else {
-      // Fallback: poll every 3 seconds
-      const interval = setInterval(() => fetchParticipants(), 3000);
+      // v4.8.0: Graceful degradation - slower polling (7.5s instead of 3s)
+      const interval = setInterval(() => fetchParticipants(), FALLBACK_POLLING_INTERVAL);
       return () => clearInterval(interval);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
