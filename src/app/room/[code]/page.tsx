@@ -566,6 +566,7 @@ export default function RoomPage() {
   const [favorites, setFavorites] = useState<Song[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoriteSongIds, setFavoriteSongIds] = useState<Set<string>>(new Set());
+  const [favoritesSearchQuery, setFavoritesSearchQuery] = useState(''); // v4.8.1: Search filter for favorites
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [addingYoutube, setAddingYoutube] = useState(false);
   const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
@@ -1571,6 +1572,7 @@ export default function RoomPage() {
         <button
           onClick={() => {
             setActiveTab('favorites');
+            setFavoritesSearchQuery(''); // v4.8.1: Clear search on tab open
             fetchFavorites();
           }}
           style={{
@@ -2258,6 +2260,30 @@ export default function RoomPage() {
       {/* Favorites Tab */}
       {activeTab === 'favorites' && (
         <div style={{ padding: '1rem' }}>
+          {/* v4.8.1: Search box for favorites */}
+          <input
+            type="text"
+            placeholder="🔍 Search your favorites..."
+            value={favoritesSearchQuery}
+            onChange={(e) => setFavoritesSearchQuery(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              fontSize: '1rem',
+              border: '2px solid #e0e0e0',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+              outline: 'none',
+              transition: 'border-color 0.2s',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = '#0070f3';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = '#e0e0e0';
+            }}
+          />
+          
           <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
             ❤️ Your Favorite Songs
           </h3>
@@ -2271,8 +2297,46 @@ export default function RoomPage() {
               No favorites yet. Add songs from your History tab!
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {favorites.map((version: any) => {
+            (() => {
+              // v4.8.2: Normalize text - remove accents for accent-insensitive search
+              const normalizeText = (text: string): string => {
+                return text
+                  .toLowerCase()
+                  .normalize('NFD') // Decompose accented characters
+                  .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+                  .replace(/đ/g, 'd') // Vietnamese đ → d
+                  .replace(/Đ/g, 'd');
+              };
+
+              // v4.8.2: Filter favorites with accent-insensitive search
+              const filteredFavorites = favoritesSearchQuery.trim() === '' 
+                ? favorites 
+                : favorites.filter((version: any) => {
+                    const query = normalizeText(favoritesSearchQuery);
+                    const title = normalizeText(version.title_display || version.title || '');
+                    const artist = normalizeText(version.artist_name || version.artist || '');
+                    const tone = normalizeText(version.tone || '');
+                    const mixer = normalizeText(version.mixer || '');
+                    const style = normalizeText(version.style || '');
+                    
+                    return title.includes(query) || 
+                           artist.includes(query) || 
+                           tone.includes(query) || 
+                           mixer.includes(query) || 
+                           style.includes(query);
+                  });
+
+              return filteredFavorites.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+                  No favorites match "{favoritesSearchQuery}"
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '0.5rem' }}>
+                    Showing {filteredFavorites.length} of {favorites.length} favorites
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {filteredFavorites.map((version: any) => {
                 const isYouTube = version.source_type === 'youtube' || version.youtube_url;
                 
                 return (
@@ -2358,7 +2422,10 @@ export default function RoomPage() {
                   </div>
                 );
               })}
-            </div>
+                  </div>
+                </>
+              );
+            })()
           )}
         </div>
       )}

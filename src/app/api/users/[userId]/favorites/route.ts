@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/server/lib/supabase';
 /**
  * GET /api/users/:userId/favorites
  * Fetch user's favorite songs
+ * v4.8.1: Deduplication happens here (display-time) not at save-time
  */
 export async function GET(
   request: NextRequest,
@@ -89,7 +90,8 @@ export async function GET(
     // Combine database and YouTube favorites
     const allFavorites = [...(versions || []), ...youtubeFavorites];
 
-    // v4.7.2: Remove duplicate YouTube URLs (keep first occurrence)
+    // v4.8.1: Deduplicate YouTube URLs at display-time (not save-time)
+    // Keep first occurrence, remove duplicates by URL
     const seenYoutubeUrls = new Set<string>();
     const deduplicatedFavorites = allFavorites.filter(fav => {
       if (fav.youtube_url) {
@@ -101,10 +103,10 @@ export async function GET(
       return true;
     });
 
-    // If we removed duplicates, update the database to clean up
+    // Auto-cleanup: If we removed duplicates, update database
     if (deduplicatedFavorites.length < allFavorites.length) {
       const cleanedIds = deduplicatedFavorites.map(f => f.id);
-      console.log('[GET favorites] Cleaning up duplicates:', allFavorites.length, '→', cleanedIds.length);
+      console.log('[GET favorites] Auto-cleaning duplicates:', allFavorites.length, '→', cleanedIds.length);
       
       await supabaseAdmin
         .from('kara_user_preferences')
@@ -133,6 +135,7 @@ export async function GET(
  * POST /api/users/:userId/favorites
  * Add a song to user's favorites
  * Body: { song_id: string }
+ * v4.8.1: Simplified - just check if ID already in array
  */
 export async function POST(
   request: NextRequest,
@@ -146,13 +149,6 @@ export async function POST(
     if (!song_id) {
       return NextResponse.json({ error: 'song_id is required' }, { status: 400 });
     }
-
-    // v4.7.2: Check if this is a YouTube song and get its URL
-    const { data: newItem } = await supabaseAdmin
-      .from('kara_queue')
-      .select('youtube_url, source_type')
-      .eq('id', song_id)
-      .maybeSingle();
 
     // Get current favorite_song_ids
     const { data: preferences, error: prefError } = await supabaseAdmin
@@ -168,54 +164,36 @@ export async function POST(
 
     const currentFavorites = (preferences?.favorite_song_ids as string[]) || [];
 
-    // v4.7.2: For YouTube songs, check for duplicate URLs (not just IDs)
-    let shouldAdd = true;
-    if (newItem?.source_type === 'youtube' && newItem.youtube_url) {
-      // Fetch all current YouTube favorites to check for duplicate URLs
-      if (currentFavorites.length > 0) {
-        const { data: existingYoutubeItems } = await supabaseAdmin
-          .from('kara_queue')
-          .select('id, youtube_url, source_type')
-          .eq('source_type', 'youtube')
-          .in('id', currentFavorites);
-
-        // Check if any existing favorite has the same YouTube URL
-        const hasDuplicateUrl = existingYoutubeItems?.some(
-          item => item.youtube_url === newItem.youtube_url
-        );
-
-        if (hasDuplicateUrl) {
-          console.log('[POST favorites] Duplicate YouTube URL detected, skipping:', newItem.youtube_url);
-          shouldAdd = false;
-        }
-      }
+    // Check if already in favorites
+    if (currentFavorites.includes(song_id)) {
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Already in favorites'
+      });
     }
 
-    // v4.6.1: Deduplicate by ID (prevent rapid-tap duplicates)
-    const updatedFavorites = Array.from(new Set([...currentFavorites, song_id]));
+    // Add to favorites
+    const updatedFavorites = [...currentFavorites, song_id];
 
-    // Only update if there's a change and should add
-    if (shouldAdd && updatedFavorites.length !== currentFavorites.length) {
-      // Upsert kara_user_preferences
-      const { error: upsertError } = await supabaseAdmin
-        .from('kara_user_preferences')
-        .upsert({
-          user_id: userId,
-          favorite_song_ids: updatedFavorites,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id'
-        });
+    // Upsert kara_user_preferences
+    const { error: upsertError } = await supabaseAdmin
+      .from('kara_user_preferences')
+      .upsert({
+        user_id: userId,
+        favorite_song_ids: updatedFavorites,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id'
+      });
 
-      if (upsertError) {
-        console.error('[POST favorites] Error upserting preferences:', upsertError);
-        return NextResponse.json({ error: 'Failed to add favorite' }, { status: 500 });
-      }
+    if (upsertError) {
+      console.error('[POST favorites] Error upserting preferences:', upsertError);
+      return NextResponse.json({ error: 'Failed to add favorite' }, { status: 500 });
     }
 
     return NextResponse.json({ 
       success: true, 
-      message: shouldAdd ? 'Added to favorites' : 'Already in favorites'
+      message: 'Added to favorites'
     });
   } catch (error) {
     console.error('[POST favorites] Unexpected error:', error);
