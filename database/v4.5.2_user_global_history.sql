@@ -57,6 +57,10 @@ CREATE UNIQUE INDEX idx_history_user_version
 -- ============================================
 -- Modify to lookup history by user_id + version_id only (not room_id)
 
+-- Drop existing function first (required to change return type)
+DROP FUNCTION IF EXISTS advance_playback(UUID);
+
+-- Recreate function with user-global history logic
 CREATE OR REPLACE FUNCTION advance_playback(p_room_id UUID)
 RETURNS TABLE(
   next_song_id UUID,
