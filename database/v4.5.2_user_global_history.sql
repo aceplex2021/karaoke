@@ -16,6 +16,9 @@ BEGIN;
 -- If user sang same song in multiple rooms, consolidate into one entry
 -- Keep the entry with highest times_sung + most recent sung_at
 
+-- Drop temp table if exists (for re-runs)
+DROP TABLE IF EXISTS history_to_keep;
+
 -- Create temporary table to track which entries to keep
 CREATE TEMP TABLE history_to_keep AS
 SELECT DISTINCT ON (user_id, version_id)
@@ -46,7 +49,8 @@ WHERE id NOT IN (SELECT id FROM history_to_keep);
 -- Drop old constraint (room_id, user_id, version_id)
 DROP INDEX IF EXISTS idx_history_room_user_version;
 
--- Create new constraint (user_id, version_id only)
+-- Create new constraint (user_id, version_id only) - idempotent
+DROP INDEX IF EXISTS idx_history_user_version;
 CREATE UNIQUE INDEX idx_history_user_version 
   ON kara_song_history(user_id, version_id);
 
