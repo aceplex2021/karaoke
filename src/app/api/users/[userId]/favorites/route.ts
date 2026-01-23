@@ -89,7 +89,40 @@ export async function GET(
     // Combine database and YouTube favorites
     const allFavorites = [...(versions || []), ...youtubeFavorites];
 
-    return NextResponse.json({ favorites: allFavorites });
+    // v4.7.2: Remove duplicate YouTube URLs (keep first occurrence)
+    const seenYoutubeUrls = new Set<string>();
+    const deduplicatedFavorites = allFavorites.filter(fav => {
+      if (fav.youtube_url) {
+        if (seenYoutubeUrls.has(fav.youtube_url)) {
+          return false; // Skip duplicate URL
+        }
+        seenYoutubeUrls.add(fav.youtube_url);
+      }
+      return true;
+    });
+
+    // If we removed duplicates, update the database to clean up
+    if (deduplicatedFavorites.length < allFavorites.length) {
+      const cleanedIds = deduplicatedFavorites.map(f => f.id);
+      console.log('[GET favorites] Cleaning up duplicates:', allFavorites.length, '→', cleanedIds.length);
+      
+      await supabaseAdmin
+        .from('kara_user_preferences')
+        .update({
+          favorite_song_ids: cleanedIds,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+    }
+
+    // v4.6.1: Sort alphabetically by title
+    deduplicatedFavorites.sort((a, b) => {
+      const titleA = (a.title_display || '').toLowerCase();
+      const titleB = (b.title_display || '').toLowerCase();
+      return titleA.localeCompare(titleB);
+    });
+
+    return NextResponse.json({ favorites: deduplicatedFavorites });
   } catch (error) {
     console.error('[GET favorites] Unexpected error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -114,6 +147,13 @@ export async function POST(
       return NextResponse.json({ error: 'song_id is required' }, { status: 400 });
     }
 
+    // v4.7.2: Check if this is a YouTube song and get its URL
+    const { data: newItem } = await supabaseAdmin
+      .from('kara_queue')
+      .select('youtube_url, source_type')
+      .eq('id', song_id)
+      .maybeSingle();
+
     // Get current favorite_song_ids
     const { data: preferences, error: prefError } = await supabaseAdmin
       .from('kara_user_preferences')
@@ -128,10 +168,34 @@ export async function POST(
 
     const currentFavorites = (preferences?.favorite_song_ids as string[]) || [];
 
-    // Add song_id if not already in favorites
-    if (!currentFavorites.includes(song_id)) {
-      const updatedFavorites = [...currentFavorites, song_id];
+    // v4.7.2: For YouTube songs, check for duplicate URLs (not just IDs)
+    let shouldAdd = true;
+    if (newItem?.source_type === 'youtube' && newItem.youtube_url) {
+      // Fetch all current YouTube favorites to check for duplicate URLs
+      if (currentFavorites.length > 0) {
+        const { data: existingYoutubeItems } = await supabaseAdmin
+          .from('kara_queue')
+          .select('id, youtube_url, source_type')
+          .eq('source_type', 'youtube')
+          .in('id', currentFavorites);
 
+        // Check if any existing favorite has the same YouTube URL
+        const hasDuplicateUrl = existingYoutubeItems?.some(
+          item => item.youtube_url === newItem.youtube_url
+        );
+
+        if (hasDuplicateUrl) {
+          console.log('[POST favorites] Duplicate YouTube URL detected, skipping:', newItem.youtube_url);
+          shouldAdd = false;
+        }
+      }
+    }
+
+    // v4.6.1: Deduplicate by ID (prevent rapid-tap duplicates)
+    const updatedFavorites = Array.from(new Set([...currentFavorites, song_id]));
+
+    // Only update if there's a change and should add
+    if (shouldAdd && updatedFavorites.length !== currentFavorites.length) {
       // Upsert kara_user_preferences
       const { error: upsertError } = await supabaseAdmin
         .from('kara_user_preferences')
@@ -149,7 +213,10 @@ export async function POST(
       }
     }
 
-    return NextResponse.json({ success: true, message: 'Added to favorites' });
+    return NextResponse.json({ 
+      success: true, 
+      message: shouldAdd ? 'Added to favorites' : 'Already in favorites'
+    });
   } catch (error) {
     console.error('[POST favorites] Unexpected error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

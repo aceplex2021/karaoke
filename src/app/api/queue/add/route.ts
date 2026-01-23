@@ -76,29 +76,33 @@ export async function POST(request: NextRequest) {
     
     const queueMode = room.queue_mode || 'fifo';
     
-    // 2. Calculate position using PostgreSQL function (handles both FIFO and round-robin)
-    const { data: positionData, error: posError } = await supabaseAdmin
+    // v4.7.0: Calculate sort_key using PostgreSQL function (returns sort_key, not position)
+    const { data: sortKeyData, error: posError } = await supabaseAdmin
       .rpc('calculate_round_robin_position', {
         p_room_id: room_id,
         p_user_id: user_id
       });
     
+    let sortKey: number;
     let position: number;
     if (posError) {
-      console.error('[queue/add] Position calculation error:', posError);
-      // Fallback to simple max + 1 if function fails
-      const { data: maxPosData } = await supabaseAdmin
+      console.error('[queue/add] Sort key calculation error:', posError);
+      // Fallback to simple max + 1000.0 if function fails
+      const { data: maxData } = await supabaseAdmin
         .from('kara_queue')
-        .select('position')
+        .select('sort_key, position')
         .eq('room_id', room_id)
-        .in('status', ['pending', 'playing'])
-        .order('position', { ascending: false })
+        .eq('status', 'pending')
+        .order('sort_key', { ascending: false })
         .limit(1)
         .maybeSingle();
       
-      position = (maxPosData?.position || 0) + 1;
+      sortKey = (maxData?.sort_key || 0) + 1000.0;
+      position = (maxData?.position || 0) + 1;
     } else {
-      position = positionData as number;
+      sortKey = sortKeyData as number;
+      // Position will be calculated from sort_key order
+      position = 1; // Temporary, will be updated by reorder function
     }
     
     // 3. Calculate round_number for round-robin mode
@@ -144,7 +148,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // 4. Insert into queue (stores version_id ONLY, not song_id)
+    // v4.7.0: Insert into queue with sort_key for proper ordering
     const { data, error } = await supabaseAdmin
       .from('kara_queue')
       .insert({
@@ -152,6 +156,7 @@ export async function POST(request: NextRequest) {
         version_id: finalVersionId,  // ← Single source of truth
         user_id,
         position,
+        sort_key: sortKey,  // v4.7.0: Essential for proper ordering
         round_number: roundNumber,
         status: 'pending'  // Always starts as pending
       })

@@ -132,9 +132,8 @@ export async function GET(
       }
     }
     
-    // 3. Get pending queue (ordered by queue_mode)
-    // Round-robin: order by round_number first, then position
-    // FIFO: order by position only
+    // 3. Get pending queue (ordered by sort_key for v4.7.0 optimization)
+    // v4.7.0: Always order by sort_key, which handles both FIFO and round-robin
     const { data: queueDataRaw, error: queueError } = await supabaseAdmin
       .from('kara_queue')
       .select(`
@@ -153,19 +152,10 @@ export async function GET(
       `)
       .eq('room_id', roomId)
       .eq('status', 'pending')
-      .order('position', { ascending: true });
+      .order('sort_key', { ascending: true }); // v4.7.0: Use sort_key instead of position
     
-    // Sort by queue_mode: round-robin needs round_number first, then position
-    const queueData = queueDataRaw ? (room.queue_mode === 'round_robin'
-      ? [...queueDataRaw].sort((a, b) => {
-          const roundA = a.round_number || 0;
-          const roundB = b.round_number || 0;
-          if (roundA !== roundB) {
-            return roundA - roundB;
-          }
-          return (a.position || 0) - (b.position || 0);
-        })
-      : queueDataRaw) : null;
+    // Queue already sorted by sort_key
+    const queueData = queueDataRaw;
     
     if (queueError) {
       console.error('[state] Queue query error:', queueError);

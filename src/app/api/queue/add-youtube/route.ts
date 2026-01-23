@@ -121,84 +121,76 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Calculate position based on queue mode
+    // v4.7.0: Calculate sort_key for proper ordering (replaces position-based logic)
+    let sortKey = 1000.0;
     let position = 1;
     let roundNumber = 1;
     const queueMode = room.queue_mode || 'fifo';
 
     if (queueMode === 'round_robin') {
-      // Round-robin: Calculate fair position and round number
-      
-      // Get max round number
-      const { data: maxRoundData } = await supabaseAdmin
-        .from('kara_queue')
-        .select('round_number')
-        .eq('room_id', room_id)
-        .eq('status', 'pending')
-        .order('round_number', { ascending: false })
-        .limit(1);
-      
-      const maxRound = maxRoundData?.[0]?.round_number || 0;
-      
-      // Find the first round (1 to maxRound+1) where this user doesn't have a song
-      let foundRound = false;
-      for (let round = 1; round <= maxRound + 1; round++) {
-        const { data: userInRound } = await supabaseAdmin
+      // Round-robin: Use calculate_round_robin_position function
+      const { data: rrData, error: rrError } = await supabaseAdmin
+        .rpc('calculate_round_robin_position', {
+          p_room_id: room_id,
+          p_user_id: user_id
+        });
+
+      if (rrError) {
+        console.error('[API] Error calculating round-robin position:', rrError);
+        // Fallback to end of queue
+        const { data: lastSong } = await supabaseAdmin
           .from('kara_queue')
-          .select('id')
+          .select('sort_key, position, round_number')
+          .eq('room_id', room_id)
+          .eq('status', 'pending')
+          .order('sort_key', { ascending: false })
+          .limit(1);
+        
+        sortKey = lastSong?.[0]?.sort_key ? lastSong[0].sort_key + 1000.0 : 1000.0;
+        position = lastSong?.[0]?.position ? lastSong[0].position + 1 : 1;
+        roundNumber = lastSong?.[0]?.round_number || 1;
+      } else {
+        sortKey = rrData || 1000.0;
+        
+        // Get max round number for this user to determine round_number
+        const { data: userRounds } = await supabaseAdmin
+          .from('kara_queue')
+          .select('round_number')
           .eq('room_id', room_id)
           .eq('user_id', user_id)
           .eq('status', 'pending')
-          .eq('round_number', round)
+          .order('round_number', { ascending: false })
           .limit(1);
         
-        if (!userInRound || userInRound.length === 0) {
-          roundNumber = round;
-          foundRound = true;
-          break;
-        }
-      }
-      
-      // Fallback (shouldn't happen)
-      if (!foundRound) {
-        roundNumber = maxRound + 1;
-      }
-
-      // Calculate position: find last song in the same or previous round
-      const { data: lastInRound } = await supabaseAdmin
-        .from('kara_queue')
-        .select('position')
-        .eq('room_id', room_id)
-        .eq('status', 'pending')
-        .lte('round_number', roundNumber)
-        .order('position', { ascending: false })
-        .limit(1);
-
-      if (lastInRound && lastInRound.length > 0) {
-        position = lastInRound[0].position + 1;
+        roundNumber = userRounds?.[0]?.round_number ? userRounds[0].round_number + 1 : 1;
+        
+        // Position will be recalculated by trigger/function
+        position = 1; // Temporary, will be updated
       }
     } else {
-      // FIFO: Add to end
+      // FIFO: Add to end with spacing
       const { data: lastSong } = await supabaseAdmin
         .from('kara_queue')
-        .select('position')
+        .select('sort_key, position')
         .eq('room_id', room_id)
         .eq('status', 'pending')
-        .order('position', { ascending: false })
+        .order('sort_key', { ascending: false })
         .limit(1);
 
       if (lastSong && lastSong.length > 0) {
+        sortKey = lastSong[0].sort_key + 1000.0;
         position = lastSong[0].position + 1;
       }
     }
 
-    // Add to queue with metadata
+    // v4.7.0: Add to queue with metadata (includes sort_key)
     const { data: queueItem, error: insertError } = await supabaseAdmin
       .from('kara_queue')
       .insert({
         room_id,
         user_id,
         position,
+        sort_key: sortKey, // v4.7.0: Essential for proper ordering
         round_number: roundNumber,
         source_type: 'youtube',
         youtube_url,

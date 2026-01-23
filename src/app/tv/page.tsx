@@ -64,7 +64,6 @@ function TVModePageContent() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [volume, setVolume] = useState(1);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(false); // Mobile sidebar toggle
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showUpNextBanner, setShowUpNextBanner] = useState(false); // v4.5.1: Stable banner visibility
@@ -78,9 +77,9 @@ function TVModePageContent() {
   const roomRef = useRef<Room | null>(null);
   const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
   const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
-  const sidebarTimerRef = useRef<NodeJS.Timeout | null>(null); // Auto-hide sidebar timer
   const realtimeChannelRef = useRef<any>(null); // v4.4: Supabase Realtime channel
   const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
+  const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
 
   // Load room from localStorage or URL - setup polling
   useEffect(() => {
@@ -188,70 +187,35 @@ function TVModePageContent() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // v4.5.1: Update Up Next banner visibility (prevent flickering by only updating on threshold cross)
+  // v4.5.3: Reset banner and time when song changes to prevent flickering/stuck state
+  useEffect(() => {
+    if (upNext?.id) {
+      console.log('[tv] 🔄 Song changed - resetting banner state for upNext:', upNext.id);
+      setShowUpNextBanner(false);
+      setCurrentTime(0);
+      setDuration(0);
+    }
+  }, [upNext?.id]);
+
+  // v4.7.1: Update Up Next banner visibility (fixed infinite loop - removed showUpNextBanner from deps)
   useEffect(() => {
     if (!upNext || !currentSong || needsUserInteraction || duration <= 0 || currentTime <= 0) {
-      if (showUpNextBanner) {
-        setShowUpNextBanner(false);
-      }
+      setShowUpNextBanner(false);
       return;
     }
     
     const timeRemaining = duration - currentTime;
     const shouldShow = timeRemaining > 0 && timeRemaining <= 60;
     
-    if (shouldShow !== showUpNextBanner) {
-      setShowUpNextBanner(shouldShow);
-      if (shouldShow) {
-        console.log('[tv] 🎵 Up Next banner activated - time remaining:', Math.round(timeRemaining), 's');
-      }
+    setShowUpNextBanner(shouldShow);
+    
+    // Only log once when banner activates (not every second)
+    if (shouldShow && timeRemaining > 59 && timeRemaining < 60.5) {
+      console.log('[tv] 🎵 Up Next banner activated - time remaining: ~60s');
     }
-  }, [currentTime, duration, upNext, currentSong, needsUserInteraction, showUpNextBanner]);
+  }, [currentTime, duration, upNext, currentSong, needsUserInteraction]);
 
-  // Auto-hide sidebar after 10 seconds of inactivity
-  useEffect(() => {
-    // Only run on client-side
-    if (typeof window === 'undefined') return;
-    
-    console.log('[tv] 🎯 Sidebar useEffect triggered - showSidebar:', showSidebar, 'Timer ref:', sidebarTimerRef.current);
-    
-    if (showSidebar) {
-      // Clear any existing timer
-      if (sidebarTimerRef.current) {
-        console.log('[tv] 🧹 Clearing existing sidebar timer:', sidebarTimerRef.current);
-        clearTimeout(sidebarTimerRef.current);
-        sidebarTimerRef.current = null;
-      }
-      
-      // Set new timer for 10 seconds
-      console.log('[tv] ⏰ Setting 10-second auto-hide timer at', new Date().toISOString());
-      const timerId = setTimeout(() => {
-        console.log('[tv] 🔔 Auto-hide timer FIRED - closing sidebar at', new Date().toISOString());
-        setShowSidebar(false);
-      }, 10000);
-      sidebarTimerRef.current = timerId;
-      console.log('[tv] ✅ Timer ID stored:', timerId, 'Will fire at:', new Date(Date.now() + 10000).toISOString());
-      
-      return () => {
-        console.log('[tv] 🚫 Cleanup function called while sidebar was open - clearing timer:', sidebarTimerRef.current);
-        if (sidebarTimerRef.current) {
-          clearTimeout(sidebarTimerRef.current);
-          sidebarTimerRef.current = null;
-        }
-      };
-    } else {
-      // Clear timer when sidebar is closed
-      if (sidebarTimerRef.current) {
-        console.log('[tv] ✕ Sidebar closed manually - clearing timer:', sidebarTimerRef.current);
-        clearTimeout(sidebarTimerRef.current);
-        sidebarTimerRef.current = null;
-      }
-      
-      return () => {
-        console.log('[tv] 🚫 Cleanup function called while sidebar was closed');
-      };
-    }
-  }, [showSidebar]);
+  // v4.6.0: Sidebar removed - QR code now always visible
 
   /**
    * Deterministic refresh function (canonical HTTP fetch)
@@ -623,6 +587,12 @@ function TVModePageContent() {
       // After media_url change: set video.src, load(), attempt play()
       // Use setTimeout to ensure video is fully ready (fixes autoplay timing issue)
       setTimeout(() => {
+        // v4.7.1: Check lock to prevent race with manual play/pause button
+        if (playbackLockRef.current) {
+          console.log('[tv] Skipping auto-play, playback operation in progress');
+          return;
+        }
+        playbackLockRef.current = true;
         currentVideo.play().then(() => {
           console.log('[tv] Play() succeeded for queue item:', queueItemId);
           // Mark this queue item as the one actually playing
@@ -644,6 +614,8 @@ function TVModePageContent() {
               api.advancePlayback(room.id).catch(console.error);
             }
           }
+        }).finally(() => {
+          playbackLockRef.current = false; // Release lock
         });
       }, 100); // Small delay to ensure video element is ready
     };
@@ -889,7 +861,8 @@ function TVModePageContent() {
             zIndex: 2000,
           }}
           onClick={async () => {
-            if (videoRef.current) {
+            if (videoRef.current && !playbackLockRef.current) {
+              playbackLockRef.current = true; // v4.7.1: Lock to prevent race conditions
               try {
                 console.log('[tv] User interaction - retrying play()');
                 await videoRef.current.play();
@@ -898,6 +871,8 @@ function TVModePageContent() {
                 setNeedsUserInteraction(false);
               } catch (err) {
                 console.error('[tv] Failed to play after user interaction:', err);
+              } finally {
+                playbackLockRef.current = false; // Release lock
               }
             }
           }}
@@ -1047,21 +1022,24 @@ function TVModePageContent() {
             {/* Play/Pause Button */}
             <button
               onClick={async () => {
-                if (videoRef.current) {
+                if (videoRef.current && !playbackLockRef.current) {
+                  playbackLockRef.current = true; // v4.7.1: Lock to prevent race conditions
                   const video = videoRef.current;
-                  // Check actual video state, not just isPlaying state
-                  if (video.paused) {
-                    // Video is paused, play it
-                    try {
+                  try {
+                    // Check actual video state, not just isPlaying state
+                    if (video.paused) {
+                      // Video is paused, play it
                       await video.play();
                       setIsPlaying(true);
-                    } catch (err) {
-                      console.error('Failed to play:', err);
+                    } else {
+                      // Video is playing, pause it
+                      video.pause();
+                      setIsPlaying(false);
                     }
-                  } else {
-                    // Video is playing, pause it
-                    video.pause();
-                    setIsPlaying(false);
+                  } catch (err) {
+                    console.error('[tv] Play/pause failed:', err);
+                  } finally {
+                    playbackLockRef.current = false; // Release lock
                   }
                 }
               }}
@@ -1287,280 +1265,32 @@ function TVModePageContent() {
       )}
       </div>
 
-      {/* Skip Next Button - Always visible (v4.5.1) - Positioned below display badge and song title */}
-      {(currentSong || queue.length > 0) && (
-        <button
-          onClick={handleManualAdvance}
-          disabled={!currentSong && queue.length === 0}
-          style={{
-            position: 'absolute',
-            top: '7.5rem',
-            left: '1rem',
-            zIndex: 600,
-            background: (currentSong || queue.length > 0) ? 'rgba(0,0,0,0.8)' : 'rgba(128,128,128,0.5)',
-            color: 'white',
-            border: '2px solid rgba(255,255,255,0.3)',
-            borderRadius: '8px',
-            padding: '0.75rem 1rem',
-            fontSize: '1rem',
-            fontWeight: 'bold',
-            cursor: (currentSong || queue.length > 0) ? 'pointer' : 'not-allowed',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            minHeight: '48px',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            if (currentSong || queue.length > 0) {
-              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.95)';
-              e.currentTarget.style.transform = 'scale(1.05)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(0,0,0,0.8)';
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-          title="Skip to next song"
-        >
-          <span style={{ fontSize: '1.2rem' }}>⏭️</span>
-          <span>Skip Next</span>
-        </button>
-      )}
-
-      {/* Mobile Toggle Button - Only visible on mobile/tablet */}
-      <button
-        onClick={() => setShowSidebar(!showSidebar)}
-        className="sidebar-toggle-btn"
-        style={{
-          position: 'absolute',
-          top: '1rem',
-          right: '1rem',
-          zIndex: 600,
-          background: 'rgba(0,0,0,0.8)',
-          color: 'white',
-          border: '2px solid rgba(255,255,255,0.3)',
-          borderRadius: '8px',
-          padding: '0.75rem',
-          fontSize: '1.5rem',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minWidth: '48px',
-          minHeight: '48px',
-        }}
-        title={showSidebar ? 'Hide Queue' : 'Show Queue & QR'}
-      >
-        {showSidebar ? '✕' : '☰'}
-      </button>
-
-      {/* Backdrop Overlay - Only visible on mobile when sidebar is open */}
-      {showSidebar && (
+      {/* v4.7.1: QR Code - Always visible, top-right, larger size, code above */}
+      {room && (
         <div
-          className="sidebar-backdrop"
-          onClick={() => setShowSidebar(false)}
           style={{
             position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            zIndex: 499,
+            top: '1rem',
+            right: '1rem',
+            zIndex: 600,
+            background: 'rgba(255,255,255,0.95)',
+            padding: '0.5rem',
+            borderRadius: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '0.25rem',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
           }}
-        />
-      )}
-
-      {/* Queue Sidebar - Enhanced scrolling for TV browsers */}
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          width: '300px',
-          maxHeight: '100vh',
-          background: 'rgba(0,0,0,0.8)',
-          color: 'white',
-          padding: '1rem',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          zIndex: 500,
-          // Enhanced scrolling for TV browsers (FireTV, Smart TV)
-          scrollBehavior: 'smooth',
-          WebkitOverflowScrolling: 'touch', // iOS smooth scrolling
-          // Better scrollbar visibility for TV browsers
-          scrollbarWidth: 'thin', // Firefox
-          scrollbarColor: 'rgba(255,255,255,0.5) rgba(0,0,0,0.3)', // Firefox
-          // Webkit scrollbar styling (Chrome, Safari, Smart TV browsers)
-          // Note: These are pseudo-elements, so we'll add them via CSS class
-        }}
-        className={`tv-queue-scroll queue-sidebar ${showSidebar ? 'sidebar-open' : 'sidebar-closed'}`}
-      >
-        {/* QR Code - Positioned at top of queue sidebar, outside video area */}
-        {room && (
-          <div
-            style={{
-              background: 'rgba(255,255,255,0.95)',
-              padding: '0.5rem',
-              borderRadius: '8px',
-              marginBottom: '1rem',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              boxSizing: 'border-box',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            }}
-          >
-            <div style={{ fontSize: '0.7rem', marginBottom: '0.3rem', fontWeight: 'bold', textAlign: 'center', color: '#333', width: '100%' }}>
-              {room.room_code}
-            </div>
-            <div style={{ width: '100%', padding: '0.2rem', boxSizing: 'border-box', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'white', borderRadius: '4px' }}>
-              <QRCode url={getQRCodeUrl(room.room_code)} size={80} />
-            </div>
-            <div style={{ fontSize: '0.6rem', marginTop: '0.3rem', color: '#666', textAlign: 'center', width: '100%' }}>
-              Scan to join
-            </div>
+        >
+          <div style={{ fontSize: '0.9rem', fontWeight: 'bold', textAlign: 'center', color: '#333', letterSpacing: '0.1em' }}>
+            {room.room_code}
           </div>
-        )}
-        
-        <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '1rem', position: 'sticky', top: 0, background: 'rgba(0,0,0,0.8)', paddingBottom: '0.5rem', zIndex: 10 }}>
-          Queue ({queue.length})
+          <div style={{ padding: '0.25rem', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'white', borderRadius: '4px' }}>
+            <QRCode url={getQRCodeUrl(room.room_code)} size={80} />
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingBottom: '1rem' }}>
-          {queue.slice(0, 3).map((item) => (
-            <div
-              key={item.id}
-              style={{
-                padding: '0.75rem',
-                background: 'rgba(255,255,255,0.1)',
-                borderRadius: '4px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'start',
-                gap: '0.5rem',
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.25rem' }}>
-                  #{item.position}
-                </div>
-                <div style={{ fontWeight: 'normal', wordBreak: 'break-word' }}>
-                  {item.title || 'Unknown'}
-                </div>
-                <div style={{ fontSize: '0.85rem', opacity: 0.8 }}>
-                  {item.user_name || 'Guest'}
-                </div>
-              </div>
-              {isHost && item.status === 'pending' && (
-                <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, flexDirection: 'column' }}>
-                  {/* Reorder buttons */}
-                  <button
-                    onClick={async () => {
-                      if (room) {
-                        try {
-                          const currentPos = item.position;
-                          const newPos = Math.max(1, currentPos - 1);
-                          if (newPos !== currentPos) {
-                            await api.reorderQueue(item.id, newPos, room.id);
-                            await refreshState(room.id);
-                          }
-                        } catch (err: any) {
-                          console.error('[tv] Failed to move up:', err);
-                          setError(err.message || 'Failed to move up');
-                        }
-                      }
-                    }}
-                    disabled={item.position === 1}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      background: item.position === 1 ? 'rgba(128,128,128,0.3)' : 'rgba(0,123,255,0.8)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '0.9rem',
-                      fontWeight: 'bold',
-                      cursor: item.position === 1 ? 'not-allowed' : 'pointer',
-                      opacity: item.position === 1 ? 0.5 : 1,
-                      minWidth: '30px',
-                    }}
-                    title="Move up"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (room) {
-                        try {
-                          const currentPos = item.position;
-                          const maxPos = queue.length;
-                          const newPos = Math.min(maxPos, currentPos + 1);
-                          if (newPos !== currentPos) {
-                            await api.reorderQueue(item.id, newPos, room.id);
-                            await refreshState(room.id);
-                          }
-                        } catch (err: any) {
-                          console.error('[tv] Failed to move down:', err);
-                          setError(err.message || 'Failed to move down');
-                        }
-                      }
-                    }}
-                    disabled={item.position === queue.length}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      background: item.position === queue.length ? 'rgba(128,128,128,0.3)' : 'rgba(0,123,255,0.8)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '0.9rem',
-                      fontWeight: 'bold',
-                      cursor: item.position === queue.length ? 'not-allowed' : 'pointer',
-                      opacity: item.position === queue.length ? 0.5 : 1,
-                      minWidth: '30px',
-                    }}
-                    title="Move down"
-                  >
-                    ↓
-                  </button>
-                  {/* Remove button */}
-                  <button
-                    onClick={async () => {
-                      if (room && tvUserId) {
-                        try {
-                          await api.removeFromQueue(item.id, room.id, tvUserId);
-                          await refreshState(room.id);
-                        } catch (err: any) {
-                          console.error('[tv] Failed to remove:', err);
-                          setError(err.message || 'Failed to remove from queue');
-                        }
-                      }
-                    }}
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      background: 'rgba(255,107,107,0.8)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                      marginTop: '0.25rem',
-                    }}
-                    title="Remove"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-          {queue.length === 0 && !currentSong && (
-            <div style={{ textAlign: 'center', padding: '2rem', opacity: 0.6 }}>
-              Queue is empty
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
 
       {/* Start Playing Button - centered overlay when queue has songs but nothing playing */}

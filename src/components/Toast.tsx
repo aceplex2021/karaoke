@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -44,22 +44,37 @@ interface ToastItemProps {
   onRemove: (id: string) => void;
 }
 
-function ToastItem({ toast, onRemove }: ToastItemProps) {
+// v4.7.2: Memoize ToastItem to prevent re-renders when parent re-renders
+const ToastItem = React.memo(function ToastItem({ toast, onRemove }: ToastItemProps) {
   const [isVisible, setIsVisible] = useState(false);
+  const onRemoveRef = useRef(onRemove); // v4.7.2: Stable ref to prevent timer resets
+
+  // Keep ref updated
+  useEffect(() => {
+    onRemoveRef.current = onRemove;
+  }, [onRemove]);
 
   useEffect(() => {
     // Trigger animation
     setIsVisible(true);
 
-    // Auto-remove after duration
-    const duration = toast.duration || 3000;
+    // v4.7.2: Auto-remove after 5 seconds (default) - timer won't reset on re-renders
+    const duration = toast.duration || 5000;
+    console.log('[Toast] Setting timer for toast:', toast.id, 'duration:', duration, 'ms');
     const timer = setTimeout(() => {
+      console.log('[Toast] Timer fired for toast:', toast.id, 'fading out...');
       setIsVisible(false);
-      setTimeout(() => onRemove(toast.id), 300); // Wait for fade-out animation
+      setTimeout(() => {
+        console.log('[Toast] Removing toast after fade-out:', toast.id);
+        onRemoveRef.current(toast.id);
+      }, 300); // Wait for fade-out animation
     }, duration);
 
-    return () => clearTimeout(timer);
-  }, [toast.id, toast.duration, onRemove]);
+    return () => {
+      console.log('[Toast] Cleaning up timer for toast:', toast.id);
+      clearTimeout(timer);
+    };
+  }, [toast.id, toast.duration]); // Removed onRemove from deps
 
   const getToastStyles = (): React.CSSProperties => {
     const baseStyles: React.CSSProperties = {
@@ -130,7 +145,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
       style={getToastStyles()}
       onClick={() => {
         setIsVisible(false);
-        setTimeout(() => onRemove(toast.id), 300);
+        setTimeout(() => onRemoveRef.current(toast.id), 300);
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = isVisible ? 'translateX(0) scale(1.02)' : 'translateX(400px)';
@@ -145,7 +160,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         onClick={(e) => {
           e.stopPropagation();
           setIsVisible(false);
-          setTimeout(() => onRemove(toast.id), 300);
+          setTimeout(() => onRemoveRef.current(toast.id), 300);
         }}
         style={{
           background: 'rgba(255, 255, 255, 0.2)',
@@ -173,27 +188,37 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
       </button>
     </div>
   );
-}
+}); // End React.memo
 
 // Hook for using toasts
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const showToast = (message: string, type: ToastType = 'info', duration?: number) => {
+  // v4.7.2: Memoize removeToast to prevent recreation on every render
+  const removeToast = useCallback((id: string) => {
+    console.log('[Toast] Removing toast:', id);
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const showToast = useCallback((message: string, type: ToastType = 'info', duration?: number) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     const newToast: Toast = { id, message, type, duration };
+    console.log('[Toast] Adding toast:', id, message);
     setToasts((prev) => [...prev, newToast]);
     return id;
-  };
+  }, []);
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+  const success = useCallback((message: string, duration?: number) => showToast(message, 'success', duration), [showToast]);
+  const error = useCallback((message: string, duration?: number) => showToast(message, 'error', duration), [showToast]);
+  const warning = useCallback((message: string, duration?: number) => showToast(message, 'warning', duration), [showToast]);
+  const info = useCallback((message: string, duration?: number) => showToast(message, 'info', duration), [showToast]);
 
-  const success = (message: string, duration?: number) => showToast(message, 'success', duration);
-  const error = (message: string, duration?: number) => showToast(message, 'error', duration);
-  const warning = (message: string, duration?: number) => showToast(message, 'warning', duration);
-  const info = (message: string, duration?: number) => showToast(message, 'info', duration);
+  // v4.7.2: Memoize the ToastContainer component to prevent remounting on parent re-renders
+  const Container = useMemo(() => {
+    return function MemoizedToastContainer() {
+      return <ToastContainer toasts={toasts} onRemove={removeToast} />;
+    };
+  }, [toasts, removeToast]);
 
   return {
     toasts,
@@ -203,6 +228,6 @@ export function useToast() {
     error,
     warning,
     info,
-    ToastContainer: () => <ToastContainer toasts={toasts} onRemove={removeToast} />,
+    ToastContainer: Container,
   };
 }

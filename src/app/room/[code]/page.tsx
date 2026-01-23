@@ -1478,8 +1478,23 @@ export default function RoomPage() {
       {/* Search Tab */}
       {activeTab === 'search' && (
         <div style={{ padding: '1rem' }}>
+          {/* v4.7.1: Block unapproved users from adding songs */}
+          {!isHost && userApprovalStatus !== 'approved' && (
+            <div style={{
+              background: 'linear-gradient(135deg, #FFA500 0%, #FF8C00 100%)',
+              color: 'white',
+              padding: '1rem',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+              textAlign: 'center',
+              fontWeight: 'bold',
+            }}>
+              ⏳ Waiting for host approval before you can add songs
+            </div>
+          )}
+          
           {/* v4.0 YouTube Mode: Device-specific UI */}
-          {appConfig.features.youtubeSearch && (
+          {appConfig.features.youtubeSearch && (isHost || userApprovalStatus === 'approved') && (
             <div>
               {/* Android: Show YouTube search box only */}
               {isAndroid() && (
@@ -1609,7 +1624,7 @@ export default function RoomPage() {
           )}
 
           {/* v3.5 Database Mode: Database search */}
-          {appConfig.features.databaseSearch && (
+          {appConfig.features.databaseSearch && (isHost || userApprovalStatus === 'approved') && (
             <>
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
                 <input
@@ -1690,7 +1705,7 @@ export default function RoomPage() {
                   background: '#f0f8ff',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
                       {currentSong.title}
@@ -1704,6 +1719,51 @@ export default function RoomPage() {
                       🎤 {currentSong.user_name}
                     </div>
                   </div>
+                  
+                  {/* v4.6.0: Host can skip current song */}
+                  {isHost && (
+                    <button
+                      onClick={async () => {
+                        if (!room) return;
+                        try {
+                          await api.advancePlayback(room.id);
+                          success('Skipped to next song');
+                        } catch (err: any) {
+                          console.error('[room] Failed to skip:', err);
+                          showError('Failed to skip song');
+                        }
+                      }}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        background: '#dc3545',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: 'bold',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        minHeight: '44px',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#c82333';
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#dc3545';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                      title="Skip to next song"
+                    >
+                      <span style={{ fontSize: '1.2rem' }}>⏭️</span>
+                      <span>Skip Current</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1777,8 +1837,21 @@ export default function RoomPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.25rem' }}>
-                        #{index + 1}
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span>#{index + 1}</span>
+                        {/* v4.7.4: Show round number for round-robin */}
+                        {room?.queue_mode === 'round_robin' && item.round_number && (
+                          <span style={{ 
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            color: 'white',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold'
+                          }}>
+                            Round {item.round_number}
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', wordBreak: 'break-word' }}>
                         {item.title}
