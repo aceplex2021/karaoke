@@ -159,7 +159,7 @@ BEGIN
     UPDATE kara_queue
     SET 
       status = 'playing',
-      played_at = NOW()
+      started_at = NOW()
     WHERE id = v_next_entry.id;
   END IF;
   
