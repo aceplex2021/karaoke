@@ -40,7 +40,12 @@ export const api = {
 
   async getRoomByCode(code: string): Promise<{ room: Room }> {
     const res = await fetch(`${API_BASE}/rooms/code/${code}`);
-    if (!res.ok) throw new Error('Room not found');
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Room not found' }));
+      const error = new Error(errorData.error || 'Room not found');
+      (error as any).status = res.status; // Attach status for differentiation
+      throw error;
+    }
     return res.json();
   },
 
@@ -50,16 +55,28 @@ export const api = {
     return res.json();
   },
 
-  async getRoomState(roomId: string): Promise<RoomState> {
+  async getRoomState(roomId: string, userId?: string): Promise<RoomState> {
     // ENFORCE: No caching - fresh data every poll
-    const res = await fetch(`${API_BASE}/rooms/${roomId}/state?t=${Date.now()}`, {
+    // Phase 2.1: Pass userId for activity tracking
+    const url = new URL(`${API_BASE}/rooms/${roomId}/state`, window.location.origin);
+    url.searchParams.set('t', Date.now().toString());
+    if (userId) {
+      url.searchParams.set('userId', userId);
+    }
+    
+    const res = await fetch(url.toString(), {
       cache: 'no-store',
       headers: {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache'
       }
     });
-    if (!res.ok) throw new Error('Failed to get room state');
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Failed to get room state' }));
+      const error = new Error(errorData.error || 'Failed to get room state');
+      (error as any).status = res.status; // Attach status for differentiation
+      throw error;
+    }
     return res.json();
   },
 
@@ -69,7 +86,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error('Failed to join room');
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Failed to join room' }));
+      const error = new Error(errorData.error || 'Failed to join room');
+      (error as any).status = res.status; // Attach status for differentiation
+      throw error;
+    }
+    return res.json();
+  },
+
+  // Phase 2: Leave room functionality
+  async leaveRoom(roomId: string, userId: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/rooms/${roomId}/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || 'Failed to leave room');
+    }
     return res.json();
   },
 

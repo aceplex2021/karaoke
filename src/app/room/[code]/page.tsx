@@ -567,6 +567,7 @@ export default function RoomPage() {
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [favoriteSongIds, setFavoriteSongIds] = useState<Set<string>>(new Set());
   const [favoritesSearchQuery, setFavoritesSearchQuery] = useState(''); // v4.8.1: Search filter for favorites
+  const [showGoHomeButton, setShowGoHomeButton] = useState(false); // Phase 1: Show "Go Home" button for expired rooms
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [addingYoutube, setAddingYoutube] = useState(false);
   const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
@@ -599,7 +600,8 @@ export default function RoomPage() {
    */
   const refreshRoomState = useCallback(async (roomId: string) => {
     try {
-      const state = await api.getRoomState(roomId);
+      // Phase 2.1: Pass userId for activity tracking
+      const state = await api.getRoomState(roomId, user?.id);
       setRoom(state.room);
       setQueue(state.queue); // Ledger order (all pending items, by position)
       setUpNext(state.upNext); // Turn order (next to play via round-robin, read-only, informational)
@@ -607,9 +609,17 @@ export default function RoomPage() {
       console.log('[room] refreshRoomState done - queue:', state.queue.length, 'upNext:', state.upNext?.song?.title || 'none', 'current:', state.currentSong?.song?.title || 'none');
     } catch (err: any) {
       console.error('[room] Failed to refresh room state:', err);
-      setError(err.message || 'Failed to refresh room state');
+      // Phase 1: Check if it's a room expiry error (410 or 404)
+      const isRoomExpired = err.status === 410 || err.status === 404;
+      if (isRoomExpired) {
+        setError('Room expired or doesn\'t exist.');
+        setShowGoHomeButton(true);
+      } else {
+        // Real app error - preserve original message for troubleshooting
+        setError(err.message || 'Failed to refresh room state');
+      }
     }
-  }, []);
+  }, [user?.id]);
 
   /**
    * v4.8.0: Subscribe to real-time updates for room and queue
@@ -821,7 +831,15 @@ export default function RoomPage() {
         startPolling(roomData.id, FALLBACK_POLLING_INTERVAL);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to join room');
+      // Phase 1: Check if it's a room expiry error (410 or 404)
+      const isRoomExpired = err.status === 410 || err.status === 404;
+      if (isRoomExpired) {
+        setError('Room expired or doesn\'t exist.');
+        setShowGoHomeButton(true);
+      } else {
+        // Real app error - preserve original message for troubleshooting
+        setError(err.message || 'Failed to join room');
+      }
     } finally {
       setLoading(false);
     }
@@ -1428,6 +1446,30 @@ export default function RoomPage() {
     }
   };
 
+  // Phase 2: Leave room handler
+  const handleLeaveRoom = useCallback(async () => {
+    if (!user || !room) return;
+
+    if (!confirm('Are you sure you want to leave this room? You can rejoin anytime with the room code.')) {
+      return;
+    }
+
+    try {
+      await api.leaveRoom(room.id, user.id);
+      
+      // Clear localStorage
+      localStorage.removeItem('current_room_id');
+      localStorage.removeItem('current_room_code');
+      localStorage.removeItem('user_role');
+      
+      // Redirect to join page
+      window.location.href = '/join';
+    } catch (err: any) {
+      console.error('[handleLeaveRoom] Failed to leave room:', err);
+      showError(err.message || 'Failed to leave room');
+    }
+  }, [user, room, showError]);
+
   // Remove local queue math - backend is single source of truth
   // Calculate user queue count from backend state (no position calculations)
   const userQueueCount = queue.filter((item) => item.user_id === user?.id).length;
@@ -1455,9 +1497,36 @@ export default function RoomPage() {
 
   if (error && !room) {
     return (
-      <div className="phone-mode" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: '1rem', padding: '2rem' }}>
-        <div style={{ fontSize: '1.5rem', color: '#e00' }}>{error}</div>
-        <a href="/" className="btn btn-primary">Go Home</a>
+      <div className="phone-mode" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: '1rem', padding: '2rem', textAlign: 'center' }}>
+        <div style={{ fontSize: '1.5rem', color: '#e00', marginBottom: '1rem' }}>{error}</div>
+        {/* Phase 1: Show "Go Home" button for expired rooms */}
+        {showGoHomeButton && (
+          <a 
+            href="/" 
+            style={{
+              display: 'inline-block',
+              padding: '1rem 2rem',
+              background: '#0070f3',
+              color: 'white',
+              textDecoration: 'none',
+              borderRadius: '8px',
+              fontSize: '1.1rem',
+              fontWeight: 'bold',
+              boxShadow: '0 4px 12px rgba(0, 112, 243, 0.3)',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#0051cc';
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#0070f3';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            Go Home
+          </a>
+        )}
       </div>
     );
   }
@@ -1470,17 +1539,44 @@ export default function RoomPage() {
     <div className="phone-mode">
       {/* Header */}
       <div style={{ background: '#0070f3', color: 'white', padding: '1rem' }}>
-        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>
-          {room.room_name}
-        </div>
-        <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>
-          Room Code: <strong>{room.room_code}</strong>
-        </div>
-        {userQueueCount > 0 && (
-          <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '0.5rem' }}>
-            You have {userQueueCount} song{userQueueCount !== 1 ? 's' : ''} in queue
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              {room.room_name}
+            </div>
+            <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>
+              Room Code: <strong>{room.room_code}</strong>
+            </div>
+            {userQueueCount > 0 && (
+              <div style={{ fontSize: '0.9rem', opacity: 0.9, marginTop: '0.5rem' }}>
+                You have {userQueueCount} song{userQueueCount !== 1 ? 's' : ''} in queue
+              </div>
+            )}
           </div>
-        )}
+          {/* Phase 2: Leave Room Button */}
+          <button
+            onClick={handleLeaveRoom}
+            style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '6px',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              marginLeft: '1rem',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+            }}
+          >
+            🚪 Leave Room
+          </button>
+        </div>
       </div>
 
       {/* Approval Status Banner (v4.0) */}

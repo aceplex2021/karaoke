@@ -26,6 +26,20 @@ export async function GET(
       );
     }
 
+    // Phase 1: Check if room has expired
+    if (room.expires_at && new Date(room.expires_at) < new Date()) {
+      // Room has expired, mark as inactive
+      await supabaseAdmin
+        .from('kara_rooms')
+        .update({ is_active: false })
+        .eq('id', room.id);
+      
+      return NextResponse.json(
+        { error: 'Room has expired' },
+        { status: 410 } // 410 Gone
+      );
+    }
+
     return NextResponse.json({ room: room as Room });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

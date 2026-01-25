@@ -67,6 +67,7 @@ function TVModePageContent() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showUpNextBanner, setShowUpNextBanner] = useState(false); // v4.5.1: Stable banner visibility
+  const [showGoHomeButton, setShowGoHomeButton] = useState(false); // Phase 1: Show "Go Home" button for expired rooms
   
   // Prevent stale refresh overwrites
   const requestIdRef = useRef<number>(0);
@@ -127,13 +128,30 @@ function TVModePageContent() {
             // Save to localStorage for future loads
             localStorage.setItem('tv_room_id', roomId);
           } else {
-            setError(`Room code "${code}" not found`);
+            // Phase 1: Check if room expired or not found (410/404)
+            const isRoomExpired = response.status === 410 || response.status === 404;
+            if (isRoomExpired) {
+              setError('Room expired or doesn\'t exist. Host needs to create a new room.');
+              setShowGoHomeButton(true);
+            } else {
+              // Real app error - preserve original message
+              const errorData = await response.json().catch(() => ({ error: 'Room not found' }));
+              setError(errorData.error || `Room code "${code}" not found`);
+            }
             setLoading(false);
             return;
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('[tv] Error resolving code:', err);
-          setError('Failed to resolve room code');
+          // Phase 1: Check if it's a room expiry error
+          const isRoomExpired = err.status === 410 || err.status === 404;
+          if (isRoomExpired) {
+            setError('Room expired or doesn\'t exist. Host needs to create a new room.');
+            setShowGoHomeButton(true);
+          } else {
+            // Real app error - preserve original message
+            setError(err.message || 'Failed to resolve room code');
+          }
           setLoading(false);
           return;
         }
@@ -234,7 +252,8 @@ function TVModePageContent() {
     const requestId = ++requestIdRef.current;
     console.log('[tv] refreshState called for room:', roomId);
     try {
-      const state = await api.getRoomState(roomId);
+      // Phase 2.1: Pass userId for activity tracking (if available)
+      const state = await api.getRoomState(roomId, tvUserId || undefined);
       console.log('[tv] refreshState received state:', {
         roomId: state.room.id,
         current_entry_id: state.room.current_entry_id,
@@ -271,7 +290,18 @@ function TVModePageContent() {
       // Only set error if this is still the latest request
       if (requestId === requestIdRef.current) {
         console.error('Failed to refresh room state:', err);
-        setError(err.message || 'Failed to refresh room state');
+        // Phase 1: Check if it's a room expiry error (410 or 404)
+        const isRoomExpired = err.status === 410 || err.status === 404;
+        if (isRoomExpired) {
+          setError('Room expired or doesn\'t exist. Host needs to create a new room.');
+          setShowGoHomeButton(true);
+          setRoom(null); // Clear room so full-screen error display shows
+          setCurrentSong(null); // Clear current song
+        } else {
+          // Real app error - preserve original message for troubleshooting
+          setError(err.message || 'Failed to refresh room state');
+          setShowGoHomeButton(false);
+        }
       }
     }
   }, []); // Empty deps - only uses stable setState functions and refs
@@ -464,7 +494,17 @@ function TVModePageContent() {
       
       setLoading(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to load room');
+      // Phase 1: Check if it's a room expiry error (410 or 404)
+      const isRoomExpired = err.status === 410 || err.status === 404;
+      if (isRoomExpired) {
+        setError('Room expired or doesn\'t exist. Host needs to create a new room.');
+        setShowGoHomeButton(true);
+        setRoom(null); // Clear room so error display shows
+      } else {
+        // Real app error - preserve original message for troubleshooting
+        setError(err.message || 'Failed to load room');
+        setShowGoHomeButton(false);
+      }
       setLoading(false);
     }
   };
@@ -800,9 +840,52 @@ function TVModePageContent() {
 
   if (error && !currentSong) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '1rem' }}>
-        <div style={{ color: '#e00' }}>{error}</div>
-        <button onClick={() => room && loadRoom(room.id)}>Retry</button>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '1rem', padding: '2rem', textAlign: 'center' }}>
+        <div style={{ fontSize: '1.5rem', color: '#e00', marginBottom: '1rem' }}>{error}</div>
+        {/* Phase 1: Go Home button for expired rooms */}
+        {showGoHomeButton ? (
+          <a
+            href="/"
+            style={{
+              display: 'inline-block',
+              padding: '1rem 2rem',
+              background: '#0070f3',
+              color: 'white',
+              textDecoration: 'none',
+              borderRadius: '8px',
+              fontSize: '1.1rem',
+              fontWeight: 'bold',
+              boxShadow: '0 4px 12px rgba(0, 112, 243, 0.3)',
+              transition: 'all 0.3s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#0051cc';
+              e.currentTarget.style.transform = 'scale(1.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#0070f3';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+          >
+            Go Home
+          </a>
+        ) : (
+          <button 
+            onClick={() => room && loadRoom(room.id)}
+            style={{
+              padding: '1rem 2rem',
+              background: '#0070f3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '1.1rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
+        )}
       </div>
     );
   }
@@ -1392,21 +1475,55 @@ function TVModePageContent() {
       )}
 
       {/* Error Display */}
-      {error && currentSong && (
+      {error && (
         <div
           style={{
             position: 'absolute',
-            top: '1rem',
+            top: '50%',
             left: '50%',
-            transform: 'translateX(-50%)',
+            transform: 'translate(-50%, -50%)',
             background: 'rgba(255,0,0,0.9)',
             color: 'white',
-            padding: '1rem',
+            padding: '2rem',
             borderRadius: '8px',
             zIndex: 2000,
+            maxWidth: '90%',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '1rem',
           }}
         >
-          {error}
+          <div style={{ fontSize: '1.5rem' }}>{error}</div>
+          {/* Phase 1: Go Home button for expired rooms */}
+          {showGoHomeButton && (
+            <a
+              href="/"
+              style={{
+                display: 'inline-block',
+                padding: '1rem 2rem',
+                background: '#0070f3',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '8px',
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 12px rgba(0, 112, 243, 0.3)',
+                transition: 'all 0.3s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#0051cc';
+                e.currentTarget.style.transform = 'scale(1.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#0070f3';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              Go Home
+            </a>
+          )}
         </div>
       )}
     </div>

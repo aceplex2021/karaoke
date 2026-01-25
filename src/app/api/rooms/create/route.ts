@@ -94,6 +94,10 @@ export async function POST(request: NextRequest) {
     // Generate unique room code
     const roomCode = await generateUniqueRoomCode();
 
+    // Phase 1: Set expires_at explicitly (24 hours from now)
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24);
+
     // Create room
     const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
@@ -103,6 +107,7 @@ export async function POST(request: NextRequest) {
         host_id: user.id,
         queue_mode: selectedMode, // Add queue mode
         approval_mode: selectedApprovalMode, // v4.0: Add approval mode
+        expires_at: expiresAt.toISOString(), // Phase 1: Explicitly set expiry
       })
       .select()
       .single();

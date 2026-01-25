@@ -35,6 +35,8 @@ function extractBasename(storagePath: string): string {
  * - No state inference
  * - No caching
  * - Returns ONLY what's in database
+ * 
+ * Phase 2.1: Optional activity tracking (updates last_active_at if userId provided)
  */
 export async function GET(
   request: NextRequest,
@@ -42,6 +44,8 @@ export async function GET(
 ) {
   try {
     const { roomId } = await params;
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId'); // Phase 2.1: Optional userId for activity tracking
     
     // 1. Get room metadata
     const { data: room, error: roomError } = await supabaseAdmin
@@ -54,6 +58,28 @@ export async function GET(
       return NextResponse.json(
         { error: 'Room not found' },
         { status: 404 }
+      );
+    }
+
+    // Phase 1: Check if room has expired
+    if (room.expires_at && new Date(room.expires_at) < new Date()) {
+      // Room has expired, mark as inactive
+      await supabaseAdmin
+        .from('kara_rooms')
+        .update({ is_active: false })
+        .eq('id', room.id);
+      
+      return NextResponse.json(
+        { error: 'Room has expired' },
+        { status: 410 } // 410 Gone
+      );
+    }
+
+    // Also check is_active flag (defense in depth)
+    if (!room.is_active) {
+      return NextResponse.json(
+        { error: 'Room is not active' },
+        { status: 410 } // 410 Gone
       );
     }
     
@@ -236,6 +262,41 @@ export async function GET(
     
     // 4. Get next song (first in queue for upNext display)
     const upNext = queue.length > 0 ? queue[0] : null;
+    
+    // Phase 2.1: Update last_active_at for user (debounced to once per minute)
+    // Only update if userId provided and user is a participant
+    if (userId) {
+      try {
+        // Check if user is a participant
+        const { data: participant } = await supabaseAdmin
+          .from('kara_room_participants')
+          .select('id, last_active_at')
+          .eq('room_id', roomId)
+          .eq('user_id', userId)
+          .eq('status', 'approved')
+          .single();
+        
+        if (participant) {
+          // Debounce: Only update if last update was >1 minute ago
+          const lastActive = participant.last_active_at ? new Date(participant.last_active_at) : null;
+          const now = new Date();
+          const oneMinuteAgo = new Date(now.getTime() - 60 * 1000);
+          
+          if (!lastActive || lastActive < oneMinuteAgo) {
+            // Update last_active_at (debounced to once per minute)
+            await supabaseAdmin
+              .from('kara_room_participants')
+              .update({ last_active_at: now.toISOString() })
+              .eq('id', participant.id);
+            
+            console.log('[state] Updated last_active_at for user:', userId);
+          }
+        }
+      } catch (error) {
+        // Don't fail the request if activity tracking fails
+        console.warn('[state] Failed to update last_active_at:', error);
+      }
+    }
     
     // 5. Return state (pure data, no business logic)
     const state: RoomState = {

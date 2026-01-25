@@ -35,6 +35,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Phase 1: Check if room has expired
+    if (room.expires_at && new Date(room.expires_at) < new Date()) {
+      // Room has expired, mark as inactive
+      await supabaseAdmin
+        .from('kara_rooms')
+        .update({ is_active: false })
+        .eq('id', room.id);
+      
+      return NextResponse.json(
+        { error: 'Room has expired' },
+        { status: 410 } // 410 Gone
+      );
+    }
+
     // Get or create user (handle race condition for duplicate fingerprint)
     let user: any;
     const { data: existingUser } = await supabaseAdmin
@@ -85,7 +99,42 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if already participant (e.g., host who just created room)
+    // Phase 2.1: Smart cleanup - Remove only stale participations (>24h inactive)
+    // This prevents users from being stuck in multiple rooms while allowing
+    // users to return to recent rooms they were active in
+    const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    
+    // Get all user's participations in other rooms
+    const { data: otherParticipations, error: fetchError } = await supabaseAdmin
+      .from('kara_room_participants')
+      .select('id, last_active_at, role')
+      .eq('user_id', user.id)
+      .neq('room_id', room.id)
+      .neq('role', 'host');  // Never remove hosts (they own the room)
+    
+    if (fetchError) {
+      console.warn('[API /join] Warning: Failed to fetch other participations:', fetchError);
+    } else if (otherParticipations && otherParticipations.length > 0) {
+      // Filter to only stale participations (>24h inactive or null)
+      const staleIds = otherParticipations
+        .filter(p => !p.last_active_at || new Date(p.last_active_at) < new Date(staleThreshold))
+        .map(p => p.id);
+      
+      if (staleIds.length > 0) {
+        const { error: cleanupError } = await supabaseAdmin
+          .from('kara_room_participants')
+          .delete()
+          .in('id', staleIds);
+        
+        if (cleanupError) {
+          console.warn('[API /join] Warning: Failed to cleanup stale participations:', cleanupError);
+        } else {
+          console.log('[API /join] Cleaned up', staleIds.length, 'stale room participations for user:', user.id);
+        }
+      }
+    }
+
+    // Check if already participant in THIS room (e.g., host who just created room)
     const { data: existingParticipant } = await supabaseAdmin
       .from('kara_room_participants')
       .select('*')

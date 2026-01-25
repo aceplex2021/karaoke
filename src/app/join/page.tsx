@@ -17,8 +17,9 @@ export default function JoinRoomPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingRoom, setCheckingRoom] = useState(true); // v4.5.1: Check for existing room
+  const [lastRoomCode, setLastRoomCode] = useState<string | null>(null); // Phase 2: Show last room option
 
-  // v4.5.1: Auto-rejoin last room if still active
+  // Phase 2: Check for last room but show option instead of auto-redirect
   useEffect(() => {
     const checkLastRoom = async () => {
       try {
@@ -35,20 +36,25 @@ export default function JoinRoomPage() {
         console.log('[Join] Checking if last room is still active:', storedRoomCode);
         
         // Verify room still exists
-        const roomData = await api.getRoomByCode(storedRoomCode);
-        
-        if (roomData && roomData.room) {
-          console.log('[Join] ✅ Last room still active - auto-rejoining:', storedRoomCode);
-          // Auto-redirect to last room
-          router.push(`/room/${storedRoomCode}`);
-          return;
-        } else {
-          console.log('[Join] Last room not found or expired - showing join form');
-          // Clear stale data
-          localStorage.removeItem('current_room_code');
-          localStorage.removeItem('current_room_id');
-          setCheckingRoom(false);
+        try {
+          const roomData = await api.getRoomByCode(storedRoomCode);
+          
+          if (roomData && roomData.room) {
+            console.log('[Join] ✅ Last room still active - showing option:', storedRoomCode);
+            // Show option instead of auto-redirect
+            setLastRoomCode(storedRoomCode);
+            setCheckingRoom(false);
+            return;
+          }
+        } catch (error) {
+          // Room not found or expired
+          console.log('[Join] Last room not found or expired');
         }
+        
+        // Clear stale data
+        localStorage.removeItem('current_room_code');
+        localStorage.removeItem('current_room_id');
+        setCheckingRoom(false);
       } catch (error) {
         console.error('[Join] Error checking last room:', error);
         // Clear stale data on error
@@ -119,6 +125,41 @@ export default function JoinRoomPage() {
             Enter room code to join the party
           </p>
         </div>
+
+        {/* Phase 2: Last Room Option */}
+        {lastRoomCode && (
+          <div style={{ 
+            marginBottom: '1.5rem', 
+            padding: '1rem', 
+            background: '#f0f7ff', 
+            border: '1px solid #b3d9ff', 
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>
+              Return to last room?
+            </p>
+            <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '1rem' }}>
+              Room: <strong>{lastRoomCode}</strong>
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => router.push(`/room/${lastRoomCode}`)}
+                style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+              >
+                Return to {lastRoomCode}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setLastRoomCode(null)}
+                style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+              >
+                Join Different Room
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Room Code */}
         <div style={{ marginBottom: '1.5rem' }}>
