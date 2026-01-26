@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { PreviewProvider } from '@/contexts/PreviewContext';
 import { PWASetup } from '@/components/PWASetup';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: 'Kara - Karaoke Queue Manager',
@@ -65,6 +66,7 @@ export default function RootLayout({
         
         {/* PWA Setup (Service Worker Registration) */}
         <PWASetup />
+        <Analytics />
       </body>
     </html>
   );
