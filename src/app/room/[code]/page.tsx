@@ -581,6 +581,7 @@ export default function RoomPage() {
   const approvalCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Polling for approval status
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null); // v4.8.0: Real-time channel
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Reconnection attempts counter
+  const hasCheckedNameRef = useRef(false); // Fix: Prevent double execution in React Strict Mode
   
   // v4.8.0: Real-time constants
   const MAX_RECONNECT_ATTEMPTS = 5;
@@ -856,31 +857,79 @@ export default function RoomPage() {
 
   // Check if user is host and auto-join, otherwise show name input
   useEffect(() => {
+    // Fix: Prevent duplicate processing (React 18 Strict Mode calls useEffect twice)
+    if (hasCheckedNameRef.current) {
+      console.log('[Room] Already checked name, skipping');
+      return;
+    }
+    
     if (code) {
-      const userRole = localStorage.getItem('user_role');
-      const storedName = localStorage.getItem('user_display_name');
-      const storedRoomCode = localStorage.getItem('current_room_code');
+      hasCheckedNameRef.current = true; // Mark as processed
       
-      // Check if user is already in THIS specific room
-      const alreadyInThisRoom = storedRoomCode?.toUpperCase() === code.toUpperCase();
+      const checkNameAndJoin = async () => {
+        const userRole = localStorage.getItem('user_role');
+        // Fix: Check both keys for backward compatibility (user_display_name is correct, user_name is legacy)
+        let storedName = localStorage.getItem('user_display_name') 
+          || localStorage.getItem('user_name'); // Fallback to old key
+        const storedRoomCode = localStorage.getItem('current_room_code');
+        
+        // Check if user is already in THIS specific room
+        const alreadyInThisRoom = storedRoomCode?.toUpperCase() === code.toUpperCase();
+        
+        // Option B: If no name in localStorage, check database (future-proof for v5.0 auth)
+        // COST OPTIMIZATION: Use client-side Supabase directly (no serverless function invocation)
+        if (!storedName) {
+          try {
+            const fingerprint = getOrCreateFingerprint();
+            console.log('[Room] No name in localStorage, checking database for fingerprint:', fingerprint);
+            
+            // Direct client-side query (no Vercel invocation) - cost optimized
+            const { data: dbUser, error } = await supabase
+              .from('kara_users')
+              .select('id, display_name, fingerprint')
+              .eq('fingerprint', fingerprint)
+              .single();
+            
+            if (!error && dbUser?.display_name) {
+              storedName = dbUser.display_name;
+              // Store in localStorage for future use
+              if (storedName) {
+                localStorage.setItem('user_display_name', storedName);
+                console.log('[Room] Found name in database:', storedName);
+              }
+            }
+          } catch (err) {
+            console.warn('[Room] Failed to check database for user name:', err);
+            // Continue to show modal if DB check fails
+          }
+        }
+        
+        // Auto-join if user has a stored name (from localStorage, join page, or database)
+        // This allows:
+        // 1. Hosts to auto-join (name provided during room creation)
+        // 2. Users returning to same room (from share-target, etc.)
+        // 3. Users rejoining after leaving (name stored from join page)
+        // 4. Returning users (name found in database, even if localStorage cleared)
+        if (storedName) {
+          console.log('[Room] Auto-joining with stored name:', storedName, '(role:', userRole, ', alreadyInRoom:', alreadyInThisRoom, ')');
+          setLoading(true);
+          joinRoom(storedName);
+        } else {
+          // First-time users need to provide their name (no stored name found in localStorage or DB)
+          console.log('[Room] First visit, showing name input');
+          setShowNameInput(true);
+          setLoading(false);
+        }
+      };
       
-      // Auto-join if:
-      // 1. User is host (already provided name during creation)
-      // 2. User already joined this room (returning from share-target, etc.)
-      if (storedName && (userRole === 'host' || alreadyInThisRoom)) {
-        console.log('[Room] Auto-joining with stored name:', storedName, '(role:', userRole, ')');
-        setLoading(true);
-        joinRoom(storedName);
-      } else {
-        // First-time users need to provide their name
-        console.log('[Room] First visit, showing name input');
-        setShowNameInput(true);
-        setLoading(false);
-      }
+      checkNameAndJoin();
     }
     
     // Cleanup on unmount
     return () => {
+      // Fix: Reset name check guard on unmount (allows re-checking if component remounts)
+      hasCheckedNameRef.current = false;
+      
       // v4.8.0: Cleanup polling
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
@@ -1838,9 +1887,80 @@ export default function RoomPage() {
                         {addingYoutube ? 'Adding...' : '+ Add to Queue'}
                       </button>
                     </div>
-                    <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.5rem', marginBottom: 0 }}>
-                      💡 Tap the box above to detect copied YouTube links
-                    </p>
+                    
+                    {/* Detailed Instructions for iOS/Computer */}
+                    <div style={{
+                      background: '#f8f9fa',
+                      border: '1px solid #e9ecef',
+                      borderRadius: '12px',
+                      padding: '1.25rem',
+                      marginTop: '1rem',
+                      fontSize: '0.9rem',
+                      color: '#555',
+                    }}>
+                      <div style={{ 
+                        fontWeight: 'bold', 
+                        fontSize: '1rem', 
+                        marginBottom: '1rem',
+                        color: '#333',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        <span>📱</span>
+                        <span>How to Add Songs (iOS/Computer)</span>
+                      </div>
+                      
+                      <div style={{ lineHeight: '1.8' }}>
+                        <div style={{ marginBottom: '1rem' }}>
+                          <strong style={{ color: '#0070f3' }}>Step 1: Open YouTube</strong>
+                          <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                            Open the YouTube app (on iPhone/iPad) or go to <strong>youtube.com</strong> in your browser.
+                          </p>
+                        </div>
+                        
+                        <div style={{ marginBottom: '1rem' }}>
+                          <strong style={{ color: '#0070f3' }}>Step 2: Search for Your Song</strong>
+                          <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                            Search for the karaoke song you want (e.g., "Bohemian Rhapsody karaoke"). 
+                            Look for videos with lyrics or karaoke versions.
+                          </p>
+                        </div>
+                        
+                        <div style={{ marginBottom: '1rem' }}>
+                          <strong style={{ color: '#0070f3' }}>Step 3: Copy the Video Link</strong>
+                          <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                            <strong>On iPhone/iPad:</strong> Tap the <strong>Share</strong> button (arrow icon) 
+                            below the video, then tap <strong>"Copy Link"</strong>.
+                            <br />
+                            <strong>On Computer:</strong> Click the <strong>Share</strong> button below the video, 
+                            then click <strong>"Copy"</strong> next to the link.
+                          </p>
+                        </div>
+                        
+                        <div style={{ marginBottom: '1rem' }}>
+                          <strong style={{ color: '#0070f3' }}>Step 4: Paste in This App</strong>
+                          <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                            Come back to this app and <strong>paste the YouTube link</strong> in the box above 
+                            (tap the box and paste, or the app may auto-detect it). 
+                            Then click <strong>"+ Add to Queue"</strong>.
+                          </p>
+                        </div>
+                        
+                        <div style={{ 
+                          background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                          border: '1px solid #2196F3',
+                          borderRadius: '8px',
+                          padding: '0.75rem',
+                          marginTop: '1rem'
+                        }}>
+                          <p style={{ margin: 0, fontSize: '0.85rem', color: '#1565C0', fontWeight: 600 }}>
+                            💡 <strong>Quick Tip:</strong> After copying a YouTube link, tap the paste box above 
+                            - the app will automatically detect it and show a preview!
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </>
               )}

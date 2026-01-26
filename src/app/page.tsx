@@ -113,23 +113,151 @@ function V4LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
           </button>
         </div>
 
+        {/* Step-by-Step Instructions */}
         <div style={{ 
           marginTop: '2rem', 
           paddingTop: '2rem', 
-          borderTop: '1px solid #eee', 
-          fontSize: '0.85rem', 
-          color: '#666',
-          textAlign: 'center'
+          borderTop: '2px solid #eee', 
+          fontSize: '0.9rem', 
+          color: '#555',
         }}>
-          <p style={{ marginBottom: '0.5rem' }}>
-            <strong>Host:</strong> Create and manage your karaoke party
-          </p>
-          <p style={{ marginBottom: '0.5rem' }}>
-            <strong>TV:</strong> Display and play YouTube videos
-          </p>
-          <p>
-            <strong>User:</strong> Join with room code and add songs
-          </p>
+          <h2 style={{ 
+            fontSize: '1.2rem', 
+            fontWeight: 'bold', 
+            marginBottom: '1rem',
+            textAlign: 'center',
+            color: '#333'
+          }}>
+            📖 How to Set Up Your Karaoke Party
+          </h2>
+          
+          <div style={{ 
+            background: '#f8f9fa', 
+            border: '1px solid #e9ecef', 
+            borderRadius: '12px', 
+            padding: '1.5rem',
+            lineHeight: '1.8'
+          }}>
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                gap: '0.75rem',
+                marginBottom: '1rem'
+              }}>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold',
+                  flexShrink: 0,
+                  fontSize: '0.9rem'
+                }}>
+                  1
+                </div>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: '#333', fontSize: '1rem' }}>
+                    Host Creates Room First
+                  </strong>
+                  <p style={{ margin: '0.5rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                    Click <strong>"Create Room (Host)"</strong> to start your karaoke party. 
+                    You'll get a unique 6-character room code (e.g., "ABC123"). 
+                    Write this code down or share it with your TV and users.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                gap: '0.75rem',
+                marginBottom: '1rem'
+              }}>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold',
+                  flexShrink: 0,
+                  fontSize: '0.9rem'
+                }}>
+                  2
+                </div>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: '#333', fontSize: '1rem' }}>
+                    Connect TV/Display for Audio
+                  </strong>
+                  <p style={{ margin: '0.5rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                    On your <strong>TV or device connected to karaoke audio equipment</strong>, 
+                    click <strong>"I'm a TV / Media Player"</strong>. 
+                    Enter the room code from Step 1. This TV will display videos and play sound 
+                    through your karaoke system. <strong>Important:</strong> This must be the 
+                    device connected to your speakers/audio equipment for sound output.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                gap: '0.75rem',
+                marginBottom: '1rem'
+              }}>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold',
+                  flexShrink: 0,
+                  fontSize: '0.9rem'
+                }}>
+                  3
+                </div>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ color: '#333', fontSize: '1rem' }}>
+                    Users Join with Room Code
+                  </strong>
+                  <p style={{ margin: '0.5rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
+                    On their phones, users click <strong>"Join Room (User)"</strong> and enter 
+                    the same room code. Once joined, they can search for songs and add them to 
+                    the queue. Songs will automatically play on the TV display in order.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ 
+              background: 'linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%)',
+              border: '1px solid #ffc107',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginTop: '1rem'
+            }}>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: '#856404', fontWeight: 600 }}>
+                💡 <strong>Tip:</strong> The host can manage the queue, approve users (if approval mode is on), 
+                and control playback. Only the TV/display connected to audio equipment will play sound.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

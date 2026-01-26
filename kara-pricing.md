@@ -60,6 +60,8 @@ Your personal karaoke library
 CTA: Unlock Favorites Forever
 
 Subscription (Best Value)
+Demo account - free; need to enable for multi users
+
 Starter (≤3 singers)
 
 $4.99/month or $49.99/year

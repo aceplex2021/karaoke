@@ -78,9 +78,9 @@ export default function JoinRoomPage() {
       return;
     }
 
-    // Store name in localStorage
+    // Store name in localStorage (Fix: Use correct key to match room page)
     if (typeof window !== 'undefined') {
-      localStorage.setItem('user_name', userName);
+      localStorage.setItem('user_display_name', userName);
     }
 
     // Navigate to room
