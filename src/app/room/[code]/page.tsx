@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop } from '@/lib/utils';
+import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop, isIPad } from '@/lib/utils';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
 import { useToast } from '@/components/Toast';
 import { VersionCard } from '@/components/VersionCard';
@@ -610,56 +610,11 @@ export default function RoomPage() {
   const currentPlaybackTimeRef = useRef(0);
   const playRetryCountRef = useRef(0);
   
-  // Android Debug Panel - Show console logs on screen
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const debugLogsRef = useRef<string[]>([]);
-  
   // v4.8.0: Real-time constants
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 5000; // 5 seconds between reconnection attempts
   const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds (slower polling for fallback)
   
-  // Android Debug: Intercept console.log/error for on-screen display
-  useEffect(() => {
-    if (!isAndroid()) return;
-    
-    const originalLog = console.log;
-    const originalError = console.error;
-    const originalWarn = console.warn;
-    
-    const addLog = (type: 'log' | 'error' | 'warn', ...args: any[]) => {
-      const message = args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-      ).join(' ');
-      const timestamp = new Date().toLocaleTimeString();
-      const logEntry = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
-      
-      debugLogsRef.current = [...debugLogsRef.current.slice(-49), logEntry]; // Keep last 50 logs
-      setDebugLogs([...debugLogsRef.current]);
-    };
-    
-    console.log = (...args: any[]) => {
-      originalLog(...args);
-      addLog('log', ...args);
-    };
-    
-    console.error = (...args: any[]) => {
-      originalError(...args);
-      addLog('error', ...args);
-    };
-    
-    console.warn = (...args: any[]) => {
-      originalWarn(...args);
-      addLog('warn', ...args);
-    };
-    
-    return () => {
-      console.log = originalLog;
-      console.error = originalError;
-      console.warn = originalWarn;
-    };
-  }, []);
   
   // Toast notifications
   const { success, error: showError, ToastContainer } = useToast();
@@ -1235,7 +1190,7 @@ export default function RoomPage() {
       favoritePlayerRef.current = event.target;
       console.log('[Music Queue] Player ready');
       
-      // Android: Longer delay, ensure container is visible
+      // Platform-specific delays and autoplay handling
       const delay = isAndroid() ? 1500 : isIOS() ? 500 : 300;
       
       setTimeout(() => {
@@ -1283,9 +1238,20 @@ export default function RoomPage() {
             if (currentPlaybackTimeRef.current > 0) {
               favoritePlayerRef.current.seekTo(currentPlaybackTimeRef.current, true);
             }
+            
+            // iOS: Try to autoplay (may be blocked by iOS policy, but worth trying)
+            // The user already clicked "Play" button, so this should work
+            if (isIOS()) {
+              console.log('[Music Queue] iOS - attempting autoplay after user interaction');
+            }
+            
             favoritePlayerRef.current.playVideo();
           } catch (err) {
             console.error('[Music Queue] Play error:', err);
+            // iOS: If autoplay fails, log it but don't show error (user can tap player)
+            if (isIOS()) {
+              console.log('[Music Queue] iOS autoplay blocked - user may need to tap player');
+            }
           }
         }
       }, delay);
@@ -2494,7 +2460,12 @@ export default function RoomPage() {
 
       {/* Queue Tab */}
       {activeTab === 'queue' && (
-        <div style={{ padding: '1rem' }}>
+        <div style={{ 
+          padding: '1rem',
+          paddingBottom: (musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url) 
+            ? (isIPad() ? 'calc(50vh + 2rem)' : 'calc(33vh + 2rem)') 
+            : '1rem',
+        }}>
           {/* Now Playing Section */}
           {currentSong && (
             <div style={{ marginBottom: '1.5rem' }}>
@@ -2778,7 +2749,12 @@ export default function RoomPage() {
 
       {/* History Tab */}
       {activeTab === 'history' && (
-        <div style={{ padding: '1rem' }}>
+        <div style={{ 
+          padding: '1rem',
+          paddingBottom: (musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url) 
+            ? (isIPad() ? 'calc(50vh + 2rem)' : 'calc(33vh + 2rem)') 
+            : '1rem',
+        }}>
           <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
             📜 Your Song History (Last 12 Months)
           </h3>
@@ -2919,6 +2895,8 @@ export default function RoomPage() {
                         style={{ 
                           padding: '0.5rem 1rem',
                           fontSize: '0.9rem',
+                          background: '#0070f3',
+                          color: '#fff',
                         }}
                       >
                         Add to Karaoke
@@ -2946,7 +2924,7 @@ export default function RoomPage() {
                             color: '#fff',
                           }}
                         >
-                          Add to Music
+                          Add to Player
                         </button>
                       )}
                     </div>
@@ -2960,7 +2938,13 @@ export default function RoomPage() {
 
       {/* Favorites Tab */}
       {activeTab === 'favorites' && (
-        <div style={{ padding: '1rem' }}>
+        <div style={{ 
+          padding: '1rem',
+          // Add padding-bottom when mini player is visible so users can scroll past it
+          paddingBottom: (musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url) 
+            ? (isIPad() ? 'calc(50vh + 2rem)' : 'calc(33vh + 2rem)') 
+            : '1rem',
+        }}>
           {/* v4.8.1: Search box for favorites */}
           <input
             type="text"
@@ -2997,6 +2981,21 @@ export default function RoomPage() {
               <h4 style={{ fontSize: '1.1rem', marginBottom: '0.75rem', fontWeight: 'bold', color: '#333' }}>
                 🎵 Music Queue ({musicQueue.length} {musicQueue.length === 1 ? 'song' : 'songs'})
               </h4>
+              
+              {/* Mobile WiFi Limitation Note */}
+              {(isAndroid() || isIOS()) && (
+                <div style={{
+                  marginBottom: '0.75rem',
+                  padding: '0.75rem',
+                  background: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  color: '#856404',
+                }}>
+                  ⚠️ <strong>Note:</strong> "Add to Player" playback requires cellular connection on mobile devices. WiFi may restrict playback.
+                </div>
+              )}
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
                 {musicQueue.map((fav, index) => {
@@ -3098,25 +3097,8 @@ export default function RoomPage() {
                     fontWeight: 'bold',
                   }}
                 >
-                  ▶ Play Music
+                  ▶ Play
                 </button>
-                {isPlayingMusic && currentPlayingIndex !== null && (
-                  <button
-                    onClick={pauseMusicPlayback}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      fontSize: '1rem',
-                      background: '#ffc107',
-                      color: '#000',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    ⏸ Pause
-                  </button>
-                )}
                 {isPlayingMusic && currentPlayingIndex !== null && (
                   <button
                     onClick={playNextInMusicQueue}
@@ -3283,6 +3265,8 @@ export default function RoomPage() {
                         style={{ 
                           padding: '0.5rem 1rem',
                           fontSize: '0.9rem',
+                          background: '#0070f3',
+                          color: '#fff',
                         }}
                       >
                         Add to Karaoke
@@ -3310,7 +3294,7 @@ export default function RoomPage() {
                             color: '#fff',
                           }}
                         >
-                          Add to Music
+                          Add to Player
                         </button>
                       )}
                     </div>
@@ -3327,7 +3311,12 @@ export default function RoomPage() {
 
       {/* Approval Tab (Host-only, v4.0) */}
       {activeTab === 'approval' && isHost && room && (
-        <div style={{ padding: '1rem' }}>
+        <div style={{ 
+          padding: '1rem',
+          paddingBottom: (musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url) 
+            ? (isIPad() ? 'calc(50vh + 2rem)' : 'calc(33vh + 2rem)') 
+            : '1rem',
+        }}>
           <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
             ✅ User Approval Queue
           </h3>
@@ -3345,7 +3334,7 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* Music Player - Visible at bottom when playing */}
+      {/* Music Player - Mini player at bottom (max 1/3 screen height) */}
       {musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url && (
         <div
           style={{
@@ -3356,13 +3345,18 @@ export default function RoomPage() {
             background: '#000',
             zIndex: 1000,
             borderTop: '2px solid #0070f3',
-            padding: '1rem',
+            padding: '0.75rem',
+            maxHeight: isIPad() ? '50vh' : '33vh', // iPad: max 1/2 screen, others: max 1/3 screen
+            overflow: 'visible', // Allow full player to be visible
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: isIPad() ? '200px' : '140px', // iPad needs more space for full player
           }}
         >
-          <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <div style={{ color: '#fff', fontWeight: 'bold' }}>
-                🎵 Now Playing: {musicQueue[currentPlayingIndex]?.title_display || musicQueue[currentPlayingIndex]?.title || 'Unknown'}
+          <div style={{ maxWidth: '800px', margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexShrink: 0 }}>
+              <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: '0.5rem' }}>
+                🎵 {musicQueue[currentPlayingIndex]?.title_display || musicQueue[currentPlayingIndex]?.title || 'Unknown'}
               </div>
               <button
                 onClick={() => {
@@ -3377,9 +3371,11 @@ export default function RoomPage() {
                   background: 'rgba(255,255,255,0.2)',
                   border: 'none',
                   color: '#fff',
-                  padding: '0.5rem 1rem',
+                  padding: '0.4rem 0.8rem',
                   borderRadius: '4px',
                   cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  flexShrink: 0,
                 }}
               >
                 ✕ Close
@@ -3390,20 +3386,22 @@ export default function RoomPage() {
               style={{
                 width: '100%',
                 aspectRatio: '16/9',
-                maxHeight: '400px',
+                maxHeight: isIPad() ? 'calc(50vh - 60px)' : 'calc(33vh - 60px)', // iPad: 1/2 screen, others: 1/3 screen
                 background: '#000',
-                // Android: Always render container (don't use display:none) to avoid embedding issues
-                display: currentPlayingIndex !== null ? 'block' : (isAndroid() ? 'block' : 'none'),
-                visibility: currentPlayingIndex !== null ? 'visible' : (isAndroid() ? 'hidden' : 'hidden'),
-                // Android: Ensure container has dimensions even when hidden
-                minHeight: isAndroid() ? '180px' : 'auto',
-                minWidth: isAndroid() ? '320px' : 'auto',
+                display: 'block',
+                visibility: 'visible',
+                minHeight: isIPad() ? '180px' : '120px', // iPad needs larger minimum for full player
+                minWidth: isIPad() ? '320px' : '213px', // Maintain 16:9 aspect ratio
+                flex: '1 1 auto',
+                overflow: 'hidden',
+                // Ensure player is fully visible in landscape
+                objectFit: 'contain',
               }}
             >
               <YouTubePlayer
                 key={`music-player-${currentPlayingIndex}-${musicQueue[currentPlayingIndex].id}`}
                 videoUrl={musicQueue[currentPlayingIndex].youtube_url}
-                autoPlay={false}
+                autoPlay={true}
                 controls={true}
                 onReady={handleMusicPlayerReady}
                 onEnded={handleMusicPlayerEnded}
@@ -3419,106 +3417,6 @@ export default function RoomPage() {
 
       {/* Toast Notifications */}
       <ToastContainer />
-      
-      {/* Android Debug Panel */}
-      {isAndroid() && (
-        <>
-          <button
-            onClick={() => setShowDebugPanel(!showDebugPanel)}
-            style={{
-              position: 'fixed',
-              top: '10px',
-              right: '10px',
-              zIndex: 10000,
-              background: showDebugPanel ? '#ff4444' : '#0070f3',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '8px 12px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            }}
-          >
-            {showDebugPanel ? 'Hide Debug' : 'Show Debug'}
-          </button>
-          
-          {showDebugPanel && (
-            <div
-              style={{
-                position: 'fixed',
-                top: '50px',
-                right: '10px',
-                width: '90%',
-                maxWidth: '400px',
-                maxHeight: '60vh',
-                background: '#1a1a1a',
-                color: '#0f0',
-                border: '2px solid #0070f3',
-                borderRadius: '8px',
-                padding: '12px',
-                zIndex: 10000,
-                overflow: 'auto',
-                fontFamily: 'monospace',
-                fontSize: '10px',
-                lineHeight: '1.4',
-                boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
-                <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>
-                  🐛 Android Debug Logs
-                </div>
-                <button
-                  onClick={() => {
-                    debugLogsRef.current = [];
-                    setDebugLogs([]);
-                  }}
-                  style={{
-                    background: '#ff4444',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '4px 8px',
-                    fontSize: '10px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-              <div style={{ color: '#888', fontSize: '9px', marginBottom: '8px' }}>
-                Origin: {typeof window !== 'undefined' ? window.location.origin : 'N/A'}
-              </div>
-              <div style={{ color: '#888', fontSize: '9px', marginBottom: '8px' }}>
-                URL: {typeof window !== 'undefined' ? window.location.href : 'N/A'}
-              </div>
-              <div style={{ borderTop: '1px solid #333', paddingTop: '8px', maxHeight: '50vh', overflow: 'auto' }}>
-                {debugLogs.length === 0 ? (
-                  <div style={{ color: '#666', fontStyle: 'italic' }}>No logs yet...</div>
-                ) : (
-                  debugLogs.map((log, idx) => {
-                    const isError = log.includes('[ERROR]');
-                    const isWarn = log.includes('[WARN]');
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          color: isError ? '#ff6b6b' : isWarn ? '#ffd93d' : '#0f0',
-                          marginBottom: '4px',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {log}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-        </>
-      )}
 
       {/* Confirmation Modal for Remove */}
       {showConfirmRemove && pendingRemove && (

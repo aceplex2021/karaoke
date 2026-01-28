@@ -51,9 +51,16 @@ self.addEventListener('activate', (event) => {
 // Fetch Event - ZERO CACHING
 // ============================================
 self.addEventListener('fetch', (event) => {
-  // ALWAYS fetch from network
+  // Don't intercept YouTube iframe requests - let browser handle directly.
+  // SW fetch() can strip/modify Referer/Origin headers; YouTube needs them
+  // for embed validation (Error 150 on WiFi when headers are missing).
+  const url = event.request.url || '';
+  if (url.includes('youtube.com') || url.includes('youtube-nocookie.com') || url.includes('ytimg.com')) {
+    return; // Let browser handle YouTube requests (preserves headers)
+  }
+
+  // ALWAYS fetch from network for all other requests
   // NO caching, NO fallback
-  // All data must be fresh
   event.respondWith(fetch(event.request));
 });
 

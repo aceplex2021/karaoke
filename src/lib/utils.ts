@@ -66,6 +66,14 @@ export function isIOS(): boolean {
   return /iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
+export function isIPad(): boolean {
+  if (typeof window === 'undefined') return false;
+  // iPad detection: check for iPad in user agent, or check for touch + large screen
+  const ua = navigator.userAgent;
+  const isIPadUA = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return isIPadUA;
+}
+
 export function isMobile(): boolean {
   return isAndroid() || isIOS();
 }

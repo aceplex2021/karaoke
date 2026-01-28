@@ -278,8 +278,7 @@ export function YouTubePlayer({
         
         if (iframe && !iframe.hasAttribute('data-android-configured')) {
           iframe.setAttribute('data-android-configured', 'true');
-          iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-          iframe.setAttribute('referrer', 'strict-origin-when-cross-origin');
+          iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
           iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
           console.log('[YouTubePlayer] Android iframe configured via MutationObserver:', {
             found: true,
@@ -326,8 +325,7 @@ export function YouTubePlayer({
           
           if (iframe && !iframe.hasAttribute('data-android-configured')) {
             iframe.setAttribute('data-android-configured', 'true');
-            iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-            iframe.setAttribute('referrer', 'strict-origin-when-cross-origin');
+            iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
             iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
             console.log(`[YouTubePlayer] Android iframe configured via setTimeout (attempt ${attempt}):`, {
               found: true,
@@ -369,16 +367,13 @@ export function YouTubePlayer({
       }
       
       if (iframe) {
-        // Set referrer policy to ensure origin is sent (use strict-origin-when-cross-origin for Android)
-        iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-        iframe.setAttribute('referrer', 'strict-origin-when-cross-origin');
-        // Ensure iframe has proper permissions
+        // Use default referrer policy (no-referrer-when-downgrade) so YouTube gets full referrer
+        iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
         iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
         iframe.setAttribute('allowfullscreen', 'true');
         
         console.log('[YouTubePlayer] Android iframe attributes set in handleReady:', {
           referrerpolicy: iframe.getAttribute('referrerpolicy'),
-          referrer: iframe.getAttribute('referrer'),
           allow: iframe.getAttribute('allow'),
           src: iframe.src.substring(0, 100) + '...' // Log first 100 chars of src
         });
@@ -399,8 +394,7 @@ export function YouTubePlayer({
           }
           
           if (retryIframe) {
-            retryIframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-            retryIframe.setAttribute('referrer', 'strict-origin-when-cross-origin');
+            retryIframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
             retryIframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
             console.log('[YouTubePlayer] Android iframe found and configured on retry');
           } else {
