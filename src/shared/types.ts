@@ -15,6 +15,7 @@ export interface Room {
   queue_mode: 'round_robin' | 'fifo'; // Queue ordering mode
   approval_mode?: 'auto' | 'approval'; // v4.0: Join approval mode
   primary_tv_id?: string | null; // v4.3: ID of primary TV (has audio)
+  connected_tv_ids?: string[] | null; // v5.0: Array of connected TV IDs (JSONB)
 }
 
 export interface User {

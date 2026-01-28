@@ -39,6 +39,7 @@
     "node_modules",
     "scripts",
     "src/server/index.ts",
-    "src/server/routes"
+    "src/server/routes",
+    "stripe"
   ]
 }

@@ -35,7 +35,7 @@ export async function POST(
     // Get current room state
     const { data: room, error: roomError } = await supabaseAdmin
       .from('kara_rooms')
-      .select('id, primary_tv_id')
+      .select('id, primary_tv_id, connected_tv_ids')
       .eq('id', roomId)
       .single();
 
@@ -44,6 +44,19 @@ export async function POST(
         { error: 'Room not found' },
         { status: 404 }
       );
+    }
+
+    // v5.0: Add TV to connected list (via database function)
+    const { error: addTvError } = await supabaseAdmin.rpc('add_connected_tv', {
+      p_room_id: roomId,
+      p_tv_id: tv_id
+    });
+
+    if (addTvError) {
+      console.warn('[API] Failed to add TV to connected list:', addTvError);
+      // Continue anyway - not critical
+    } else {
+      console.log('[API] TV added to connected list:', tv_id);
     }
 
     let isPrimary = false;

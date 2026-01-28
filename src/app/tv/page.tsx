@@ -336,6 +336,16 @@ function TVModePageContent() {
         },
         (payload) => {
           console.log('[tv] Realtime: Room updated', payload);
+          
+          // v5.0: Check if primary_tv_id changed
+          if (payload.new && payload.old && payload.new.primary_tv_id !== payload.old.primary_tv_id) {
+            const newPrimaryTvId = payload.new.primary_tv_id;
+            const currentTvId = localStorage.getItem('tv_id');
+            const isNowPrimary = newPrimaryTvId === currentTvId;
+            setIsPrimaryTV(isNowPrimary);
+            console.log('[tv] Primary TV changed:', isNowPrimary ? 'PRIMARY' : 'SECONDARY', '(TV ID:', currentTvId?.slice(0, 8), '...)');
+          }
+          
           // Refresh state when room changes (especially current_entry_id)
           refreshState(roomId);
         }
@@ -1048,11 +1058,82 @@ function TVModePageContent() {
             zIndex: 1100,
             boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
             display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
+            flexDirection: 'column',
+            gap: '0.25rem',
           }}
         >
-          {isPrimaryTV ? '🔊 PRIMARY DISPLAY' : '📺 SECONDARY DISPLAY'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {isPrimaryTV ? '🔊 PRIMARY DISPLAY' : '📺 SECONDARY DISPLAY'}
+          </div>
+          {/* v5.0: Dropdown to switch Primary/Secondary (visible to all, but backend enforces host-only) */}
+          {room && tvId && room.host_id && (() => {
+            const connectedTvs = (room as any).connected_tv_ids || [];
+            const hasOtherTvs = connectedTvs.length > 1;
+            return (
+              <div style={{ marginTop: '0.5rem' }}>
+                <select
+                  value={isPrimaryTV ? 'primary' : 'secondary'}
+                  onChange={async (e) => {
+                    const newMode = e.target.value;
+                    if (newMode === (isPrimaryTV ? 'primary' : 'secondary')) return; // No change
+                    
+                    try {
+                      // Use room.host_id for the RPC call (backend will verify host)
+                      const hostId = room.host_id;
+                      if (!hostId) {
+                        alert('Room host not found');
+                        return;
+                      }
+                      
+                      if (newMode === 'primary') {
+                        // Set this TV as primary
+                        const { error } = await supabase.rpc('set_primary_tv', {
+                          p_room_id: room.id,
+                          p_user_id: hostId,
+                          p_tv_id: tvId
+                        });
+                        if (error) throw error;
+                        // Real-time will update isPrimaryTV automatically
+                      } else {
+                        // Switching to secondary: need to set another TV as primary
+                        if (!hasOtherTvs) {
+                          alert('Cannot switch to secondary: No other TVs connected. Connect another TV first.');
+                          return;
+                        }
+                        // Find another TV and set it as primary (makes this one secondary)
+                        const otherTv = connectedTvs.find((id: string) => id !== tvId);
+                        if (otherTv) {
+                          const { error } = await supabase.rpc('set_primary_tv', {
+                            p_room_id: room.id,
+                            p_user_id: hostId,
+                            p_tv_id: otherTv
+                          });
+                          if (error) throw error;
+                        }
+                      }
+                    } catch (err: any) {
+                      console.error('[tv] Failed to change TV mode:', err);
+                      alert(err.message || 'Failed to change TV mode');
+                    }
+                  }}
+                  style={{
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(255, 255, 255, 0.5)',
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    color: 'white',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="primary" style={{ color: '#333' }}>🔊 Primary (Audio)</option>
+                  <option value="secondary" style={{ color: '#333' }} disabled={!hasOtherTvs}>
+                    📺 Secondary {!hasOtherTvs ? '(Need another TV)' : '(No Audio)'}
+                  </option>
+                </select>
+              </div>
+            );
+          })()}
         </div>
       )}
 

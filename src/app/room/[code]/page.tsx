@@ -572,6 +572,9 @@ export default function RoomPage() {
   const [addingYoutube, setAddingYoutube] = useState(false);
   const [userApprovalStatus, setUserApprovalStatus] = useState<string | null>(null); // 'approved', 'pending', 'denied', null
   const [clipboardYouTube, setClipboardYouTube] = useState<{ url: string; title: string } | null>(null); // v4.3: Detected YouTube URL from clipboard
+  const [primaryTvId, setPrimaryTvId] = useState<string | null>(null); // v5.0: Current primary TV ID
+  const [connectedTvIds, setConnectedTvIds] = useState<string[]>([]); // v5.0: List of connected TV IDs
+  const [settingPrimaryTv, setSettingPrimaryTv] = useState(false); // v5.0: Loading state
   
   // v4.8.0: Real-time subscription state
   const [useRealtime, setUseRealtime] = useState(true);
@@ -595,6 +598,30 @@ export default function RoomPage() {
   const { activePreviewId, setActivePreview } = usePreview();
 
   /**
+   * Stop all polling and real-time subscriptions (cleanup on room expiry)
+   */
+  const stopAllUpdates = useCallback(() => {
+    console.log('[room] Stopping all updates (room expired)');
+    
+    // Stop polling
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+      console.log('[room] Polling stopped');
+    }
+    
+    // Unsubscribe from real-time
+    if (realtimeChannelRef.current) {
+      supabase.removeChannel(realtimeChannelRef.current);
+      realtimeChannelRef.current = null;
+      console.log('[room] Real-time subscription stopped');
+    }
+    
+    // Clear room ID to prevent further polling attempts
+    roomIdRef.current = null;
+  }, []);
+
+  /**
    * Refresh room state from backend (canonical source of truth)
    * Gets queue (ledger order) + upNext (turn order) + currentSong from backend
    * No local queue math - backend is single source of truth
@@ -607,20 +634,45 @@ export default function RoomPage() {
       setQueue(state.queue); // Ledger order (all pending items, by position)
       setUpNext(state.upNext); // Turn order (next to play via round-robin, read-only, informational)
       setCurrentSong(state.currentSong); // Currently playing (if any)
-      console.log('[room] refreshRoomState done - queue:', state.queue.length, 'upNext:', state.upNext?.song?.title || 'none', 'current:', state.currentSong?.song?.title || 'none');
+      // v5.0: Update primary TV ID and connected TVs state
+      setPrimaryTvId(state.room.primary_tv_id || null);
+      // Parse connected_tv_ids JSONB array
+      const connectedTvs = (state.room as any).connected_tv_ids;
+      let parsedTvIds: string[] = [];
+      if (Array.isArray(connectedTvs)) {
+        parsedTvIds = connectedTvs;
+        setConnectedTvIds(parsedTvIds);
+      } else if (connectedTvs) {
+        // Handle JSONB format
+        try {
+          const parsed = typeof connectedTvs === 'string' ? JSON.parse(connectedTvs) : connectedTvs;
+          parsedTvIds = Array.isArray(parsed) ? parsed : [];
+          setConnectedTvIds(parsedTvIds);
+        } catch {
+          setConnectedTvIds([]);
+        }
+      } else {
+        setConnectedTvIds([]);
+      }
+      console.log('[room] refreshRoomState done - queue:', state.queue.length, 'upNext:', state.upNext?.song?.title || 'none', 'current:', state.currentSong?.song?.title || 'none', 'connected TVs:', parsedTvIds.length);
     } catch (err: any) {
       console.error('[room] Failed to refresh room state:', err);
       // Phase 1: Check if it's a room expiry error (410 or 404)
       const isRoomExpired = err.status === 410 || err.status === 404;
       if (isRoomExpired) {
+        // Stop all polling and real-time subscriptions to prevent repeated 410 errors
+        stopAllUpdates();
+        
         setError('Room expired or doesn\'t exist.');
         setShowGoHomeButton(true);
+        setRoom(null);
+        setCurrentSong(null);
       } else {
         // Real app error - preserve original message for troubleshooting
         setError(err.message || 'Failed to refresh room state');
       }
     }
-  }, [user?.id]);
+  }, [user?.id, stopAllUpdates]);
 
   /**
    * v4.8.0: Subscribe to real-time updates for room and queue
@@ -1519,6 +1571,47 @@ export default function RoomPage() {
     }
   }, [user, room, showError]);
 
+  // v5.0: Set primary TV (host-only, direct Supabase RPC - no API call)
+  const handleSetPrimaryTV = useCallback(async (tvId: string) => {
+    if (!room || !user || !isHost) {
+      showError('Only host can change primary TV');
+      return;
+    }
+
+    if (!tvId.trim()) {
+      showError('Please select a TV');
+      return;
+    }
+
+    setSettingPrimaryTv(true);
+    try {
+      // Call database function via Supabase RPC (cost-optimized, no Vercel invocation)
+      const { data, error } = await supabase.rpc('set_primary_tv', {
+        p_room_id: room.id,
+        p_user_id: user.id,
+        p_tv_id: tvId.trim()
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        success('Primary TV updated successfully');
+        // Real-time subscription will automatically update room state
+        // Refresh room state to get updated primary_tv_id and connected TVs
+        await refreshRoomState(room.id);
+      } else {
+        showError('Failed to update primary TV');
+      }
+    } catch (err: any) {
+      console.error('[handleSetPrimaryTV] Failed:', err);
+      showError(err.message || 'Failed to update primary TV');
+    } finally {
+      setSettingPrimaryTv(false);
+    }
+  }, [room, user, isHost, success, showError, refreshRoomState]);
+
   // Remove local queue math - backend is single source of truth
   // Calculate user queue count from backend state (no position calculations)
   const userQueueCount = queue.filter((item) => item.user_id === user?.id).length;
@@ -1626,6 +1719,78 @@ export default function RoomPage() {
             🚪 Leave Room
           </button>
         </div>
+        
+        {/* v5.0: Host-only TV Display Control */}
+        {isHost && (
+          <div style={{ 
+            marginTop: '1rem', 
+            padding: '0.75rem', 
+            background: 'rgba(255, 255, 255, 0.15)', 
+            borderRadius: '6px',
+            border: '1px solid rgba(255, 255, 255, 0.2)'
+          }}>
+            <div style={{ fontSize: '0.85rem', marginBottom: '0.75rem', fontWeight: 'bold' }}>
+              📺 TV Display Control
+            </div>
+            {connectedTvIds.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {connectedTvIds.map((tvId) => {
+                  const isPrimary = tvId === primaryTvId;
+                  return (
+                    <div key={tvId} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.5rem',
+                      padding: '0.5rem',
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      borderRadius: '4px',
+                    }}>
+                      <div style={{ flex: 1, fontSize: '0.8rem' }}>
+                        {isPrimary ? '🔊 Primary Display' : '📺 Secondary Display'}
+                      </div>
+                      <select
+                        value={isPrimary ? 'primary' : 'secondary'}
+                        onChange={async (e) => {
+                          const newMode = e.target.value;
+                          if (newMode === (isPrimary ? 'primary' : 'secondary')) return;
+                          
+                          if (newMode === 'primary') {
+                            // Set this TV as primary
+                            await handleSetPrimaryTV(tvId);
+                          } else {
+                            // Switching to secondary: set first other TV as primary
+                            const otherTv = connectedTvIds.find(id => id !== tvId);
+                            if (otherTv) {
+                              await handleSetPrimaryTV(otherTv);
+                            } else {
+                              showError('Cannot switch to secondary: No other TVs connected');
+                            }
+                          }
+                        }}
+                        style={{
+                          padding: '0.4rem 0.6rem',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(255, 255, 255, 0.3)',
+                          background: 'rgba(255, 255, 255, 0.2)',
+                          color: 'white',
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="primary" style={{ color: '#333' }}>🔊 Primary</option>
+                        <option value="secondary" style={{ color: '#333' }}>📺 Secondary</option>
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.8rem', opacity: 0.8, fontStyle: 'italic' }}>
+                No TVs connected yet. Connect a TV display to this room to see it here.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Approval Status Banner (v4.0) */}
