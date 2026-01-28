@@ -13,6 +13,8 @@ import { usePreview } from '@/contexts/PreviewContext';
 import { ApprovalQueue } from '@/components/ApprovalQueue';
 import { SearchRedirect } from '@/components/SearchRedirect';
 import { appConfig } from '@/lib/config';
+import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { extractYouTubeId } from '@/lib/youtube';
 
 // ====================================
 // VERSION DISPLAY HELPERS
@@ -576,6 +578,21 @@ export default function RoomPage() {
   const [connectedTvIds, setConnectedTvIds] = useState<string[]>([]); // v5.0: List of connected TV IDs
   const [settingPrimaryTv, setSettingPrimaryTv] = useState(false); // v5.0: Loading state
   
+  // Foreground Playback - Music Queue
+  // Type for music queue items (matches favorites API response structure)
+  type MusicQueueItem = {
+    id: string;
+    title?: string;
+    title_display?: string;
+    artist?: string | null;
+    artist_name?: string | null;
+    youtube_url?: string | null;
+    source_type?: 'youtube' | 'database';
+  };
+  const [musicQueue, setMusicQueue] = useState<MusicQueueItem[]>([]);
+  const [currentPlayingIndex, setCurrentPlayingIndex] = useState<number | null>(null);
+  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  
   // v4.8.0: Real-time subscription state
   const [useRealtime, setUseRealtime] = useState(true);
   
@@ -586,10 +603,63 @@ export default function RoomPage() {
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Reconnection attempts counter
   const hasCheckedNameRef = useRef(false); // Fix: Prevent double execution in React Strict Mode
   
+  // Foreground Playback - Player refs
+  const favoritePlayerRef = useRef<any>(null);
+  const favoritePlayerContainerRef = useRef<HTMLDivElement>(null);
+  const isPlayingMusicRef = useRef(false);
+  const currentPlaybackTimeRef = useRef(0);
+  const playRetryCountRef = useRef(0);
+  
+  // Android Debug Panel - Show console logs on screen
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const debugLogsRef = useRef<string[]>([]);
+  
   // v4.8.0: Real-time constants
   const MAX_RECONNECT_ATTEMPTS = 5;
   const RECONNECT_DELAY_MS = 5000; // 5 seconds between reconnection attempts
   const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds (slower polling for fallback)
+  
+  // Android Debug: Intercept console.log/error for on-screen display
+  useEffect(() => {
+    if (!isAndroid()) return;
+    
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    const addLog = (type: 'log' | 'error' | 'warn', ...args: any[]) => {
+      const message = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
+      
+      debugLogsRef.current = [...debugLogsRef.current.slice(-49), logEntry]; // Keep last 50 logs
+      setDebugLogs([...debugLogsRef.current]);
+    };
+    
+    console.log = (...args: any[]) => {
+      originalLog(...args);
+      addLog('log', ...args);
+    };
+    
+    console.error = (...args: any[]) => {
+      originalError(...args);
+      addLog('error', ...args);
+    };
+    
+    console.warn = (...args: any[]) => {
+      originalWarn(...args);
+      addLog('warn', ...args);
+    };
+    
+    return () => {
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+    };
+  }, []);
   
   // Toast notifications
   const { success, error: showError, ToastContainer } = useToast();
@@ -1046,6 +1116,230 @@ export default function RoomPage() {
       showError('Failed to update favorite');
     }
   }, [user, favoriteSongIds, success, showError]);
+
+  // ====================================
+  // FOREGROUND PLAYBACK - MUSIC QUEUE
+  // ====================================
+
+  // Add song to music queue
+  const addToMusicQueue = useCallback((song: MusicQueueItem) => {
+    setMusicQueue(prev => [...prev, song]);
+    success('Added to Music Queue');
+  }, [success]);
+
+  // Remove from music queue
+  const removeFromMusicQueue = useCallback((index: number) => {
+    setMusicQueue(prev => prev.filter((_, i) => i !== index));
+    // If removing current song, stop playback
+    if (currentPlayingIndex === index) {
+      setIsPlayingMusic(false);
+      isPlayingMusicRef.current = false;
+      setCurrentPlayingIndex(null);
+    } else if (currentPlayingIndex !== null && currentPlayingIndex > index) {
+      // Adjust current index if song before it was removed
+      setCurrentPlayingIndex(prev => (prev !== null ? prev - 1 : null));
+    }
+  }, [currentPlayingIndex]);
+
+  // Reorder music queue
+  const reorderMusicQueue = useCallback((fromIndex: number, toIndex: number) => {
+    setMusicQueue(prev => {
+      const newQueue = [...prev];
+      const [removed] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, removed);
+      return newQueue;
+    });
+    // Adjust current index if needed
+    if (currentPlayingIndex !== null) {
+      if (fromIndex === currentPlayingIndex) {
+        setCurrentPlayingIndex(toIndex);
+      } else if (fromIndex < currentPlayingIndex && toIndex >= currentPlayingIndex) {
+        setCurrentPlayingIndex(prev => (prev !== null ? prev - 1 : null));
+      } else if (fromIndex > currentPlayingIndex && toIndex <= currentPlayingIndex) {
+        setCurrentPlayingIndex(prev => (prev !== null ? prev + 1 : null));
+      }
+    }
+  }, [currentPlayingIndex]);
+
+  // Start playing music queue
+  const playMusicQueue = useCallback(() => {
+    if (musicQueue.length === 0) {
+      showError('Music queue is empty');
+      return;
+    }
+    
+    playRetryCountRef.current = 0;
+    currentPlaybackTimeRef.current = 0;
+    
+    // Android: Ensure container is visible before setting playing index
+    if (isAndroid() && favoritePlayerContainerRef.current) {
+      favoritePlayerContainerRef.current.style.display = 'block';
+      favoritePlayerContainerRef.current.style.visibility = 'visible';
+      favoritePlayerContainerRef.current.style.opacity = '1';
+      // Force a reflow to ensure styles are applied
+      favoritePlayerContainerRef.current.offsetHeight;
+    }
+    
+    setCurrentPlayingIndex(0);
+    setIsPlayingMusic(true);
+    isPlayingMusicRef.current = true;
+  }, [musicQueue, showError]);
+
+  // Pause music playback
+  const pauseMusicPlayback = useCallback(() => {
+    if (favoritePlayerRef.current) {
+      favoritePlayerRef.current.pauseVideo();
+      setIsPlayingMusic(false);
+      isPlayingMusicRef.current = false;
+    }
+  }, []);
+
+  // Resume music playback
+  const resumeMusicPlayback = useCallback(() => {
+    if (favoritePlayerRef.current && currentPlayingIndex !== null) {
+      setIsPlayingMusic(true);
+      isPlayingMusicRef.current = true;
+      favoritePlayerRef.current.playVideo();
+    }
+  }, [currentPlayingIndex]);
+
+  // Play next song in music queue
+  const playNextInMusicQueue = useCallback(() => {
+    if (currentPlayingIndex === null || currentPlayingIndex >= musicQueue.length - 1) {
+      setIsPlayingMusic(false);
+      isPlayingMusicRef.current = false;
+      setCurrentPlayingIndex(null);
+      success('Music queue finished');
+      return;
+    }
+    setCurrentPlayingIndex(prev => (prev !== null ? prev + 1 : 0));
+    currentPlaybackTimeRef.current = 0;
+  }, [currentPlayingIndex, musicQueue.length, success]);
+
+  // Clear music queue
+  const clearMusicQueue = useCallback(() => {
+    setMusicQueue([]);
+    setCurrentPlayingIndex(null);
+    setIsPlayingMusic(false);
+    isPlayingMusicRef.current = false;
+    if (favoritePlayerRef.current) {
+      favoritePlayerRef.current.stopVideo();
+    }
+    success('Music queue cleared');
+  }, [success]);
+
+  // Player event handlers
+  const handleMusicPlayerReady = useCallback((event?: any) => {
+    // event.target is the player instance (from YouTubePlayer component)
+    if (event && event.target) {
+      favoritePlayerRef.current = event.target;
+      console.log('[Music Queue] Player ready');
+      
+      // Android: Longer delay, ensure container is visible
+      const delay = isAndroid() ? 1500 : isIOS() ? 500 : 300;
+      
+      setTimeout(() => {
+        if (favoritePlayerRef.current && isPlayingMusicRef.current) {
+          // Android: Triple-check container visibility and ensure it's in viewport
+          if (isAndroid() && favoritePlayerContainerRef.current) {
+            const rect = favoritePlayerContainerRef.current.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0 && 
+                            rect.top >= 0 && rect.left >= 0 &&
+                            rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                            rect.right <= (window.innerWidth || document.documentElement.clientWidth);
+            
+            if (!isVisible) {
+              console.warn('[Music Queue] Container not properly visible on Android, forcing visibility and retrying...');
+              // Force container to be visible
+              favoritePlayerContainerRef.current.style.display = 'block';
+              favoritePlayerContainerRef.current.style.visibility = 'visible';
+              favoritePlayerContainerRef.current.style.opacity = '1';
+              favoritePlayerContainerRef.current.style.position = 'relative';
+              favoritePlayerContainerRef.current.style.zIndex = '1000';
+              
+              setTimeout(() => {
+                if (favoritePlayerRef.current && isPlayingMusicRef.current) {
+                  try {
+                    favoritePlayerRef.current.playVideo();
+                  } catch (err) {
+                    console.error('[Music Queue] Retry play error:', err);
+                  }
+                }
+              }, 1000);
+              return;
+            }
+            
+            console.log('[Music Queue] Android container verified visible:', {
+              width: rect.width,
+              height: rect.height,
+              top: rect.top,
+              left: rect.left,
+              origin: window.location.origin
+            });
+          }
+          
+          try {
+            // Restore playback time if resuming
+            if (currentPlaybackTimeRef.current > 0) {
+              favoritePlayerRef.current.seekTo(currentPlaybackTimeRef.current, true);
+            }
+            favoritePlayerRef.current.playVideo();
+          } catch (err) {
+            console.error('[Music Queue] Play error:', err);
+          }
+        }
+      }, delay);
+    }
+  }, []);
+
+  const handleMusicPlayerEnded = useCallback(() => {
+    console.log('[Music Queue] Song ended, playing next');
+    playNextInMusicQueue();
+  }, [playNextInMusicQueue]);
+
+  const handleMusicPlayerStateChange = useCallback((state: number) => {
+    // Save playback time for state persistence (PLAYING = 1)
+    if (favoritePlayerRef.current && state === 1) {
+      try {
+        const currentTime = favoritePlayerRef.current.getCurrentTime();
+        if (typeof currentTime === 'number' && currentTime > 0) {
+          currentPlaybackTimeRef.current = currentTime;
+        }
+      } catch (err) {
+        // Ignore errors getting time
+      }
+    }
+  }, []);
+
+  const handleMusicPlayerError = useCallback((errorCode: number) => {
+    console.error('[Music Queue] YouTube error:', errorCode);
+    
+    let errorMsg = 'Unknown error';
+    switch (errorCode) {
+      case 2:
+        errorMsg = 'Invalid video ID';
+        break;
+      case 5:
+        errorMsg = 'HTML5 player error';
+        break;
+      case 100:
+        errorMsg = 'Video not found or deleted';
+        break;
+      case 101:
+      case 150:
+        errorMsg = 'Video not allowed to be played in embedded players';
+        break;
+    }
+    
+    // For Android embedding errors, log but continue
+    if (isAndroid() && (errorCode === 101 || errorCode === 150)) {
+      console.error('[Music Queue] Android embedding error - video may be restricted');
+    }
+    
+    // Skip to next song
+    showError(`Unable to play song: ${errorMsg}. Skipping to next...`);
+    playNextInMusicQueue();
+  }, [playNextInMusicQueue, showError]);
 
   // Fetch history when history tab is activated
   // v4.5.2: Fetch user-global history (not room-specific)
@@ -2049,7 +2343,7 @@ export default function RoomPage() {
                           whiteSpace: 'nowrap'
                         }}
                       >
-                        {addingYoutube ? 'Adding...' : '+ Add to Queue'}
+                        {addingYoutube ? 'Adding...' : '+ Add to Karaoke'}
                       </button>
                     </div>
                     
@@ -2108,7 +2402,7 @@ export default function RoomPage() {
                           <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>
                             Come back to this app and <strong>paste the YouTube link</strong> in the box above 
                             (tap the box and paste, or the app may auto-detect it). 
-                            Then click <strong>"+ Add to Queue"</strong>.
+                            Then click <strong>"+ Add to Karaoke"</strong>.
                           </p>
                         </div>
                         
@@ -2613,12 +2907,12 @@ export default function RoomPage() {
                           if (!room || !user) return;
                           
                           if (isYouTube && item.youtube_url) {
-                            // Add YouTube song to queue
-                            console.log('[History] Add to Queue clicked for YouTube URL:', item.youtube_url);
+                            // Add YouTube song to karaoke queue
+                            console.log('[History] Add to Karaoke clicked for YouTube URL:', item.youtube_url);
                             await handleAddYouTubeUrlFromString(item.youtube_url);
                           } else if (item.version_id) {
-                            // Add database song to queue
-                            console.log('[History] Add to Queue clicked for version_id:', item.version_id);
+                            // Add database song to karaoke queue
+                            console.log('[History] Add to Karaoke clicked for version_id:', item.version_id);
                             await handleAddVersionToQueue(item.version_id);
                           }
                         }}
@@ -2627,8 +2921,34 @@ export default function RoomPage() {
                           fontSize: '0.9rem',
                         }}
                       >
-                        Add to Queue
+                        Add to Karaoke
                       </button>
+                      {isYouTube && item.youtube_url && (
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => {
+                            // Add to music queue (foreground playback)
+                            const song: MusicQueueItem = {
+                              id: item.id,
+                              title: item.song?.title || 'Unknown',
+                              title_display: item.song?.title || 'Unknown',
+                              artist: item.song?.artist || 'Unknown Artist',
+                              artist_name: item.song?.artist || 'Unknown Artist',
+                              youtube_url: item.youtube_url,
+                              source_type: 'youtube',
+                            };
+                            addToMusicQueue(song);
+                          }}
+                          style={{ 
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.9rem',
+                            background: '#28a745',
+                            color: '#fff',
+                          }}
+                        >
+                          Add to Music
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -2664,6 +2984,174 @@ export default function RoomPage() {
               e.currentTarget.style.borderColor = '#e0e0e0';
             }}
           />
+
+          {/* Music Queue Section */}
+          {musicQueue.length > 0 && (
+            <div style={{
+              marginBottom: '1.5rem',
+              padding: '1rem',
+              background: '#f5f5f5',
+              borderRadius: '8px',
+              border: '1px solid #e0e0e0',
+            }}>
+              <h4 style={{ fontSize: '1.1rem', marginBottom: '0.75rem', fontWeight: 'bold', color: '#333' }}>
+                🎵 Music Queue ({musicQueue.length} {musicQueue.length === 1 ? 'song' : 'songs'})
+              </h4>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+                {musicQueue.map((fav, index) => {
+                  const isCurrentlyPlaying = currentPlayingIndex === index && isPlayingMusic;
+                  const isNext = currentPlayingIndex !== null && index === currentPlayingIndex + 1;
+                  
+                  return (
+                    <div
+                      key={`${fav.id}-${index}`}
+                      style={{
+                        padding: '0.75rem',
+                        background: isCurrentlyPlaying ? '#e3f2fd' : '#fff',
+                        borderRadius: '6px',
+                        border: isCurrentlyPlaying ? '2px solid #0070f3' : '1px solid #e0e0e0',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: isCurrentlyPlaying ? 'bold' : 'normal', marginBottom: '0.25rem' }}>
+                          {isCurrentlyPlaying && '▶ '}
+                          {isNext && '⏭ '}
+                          {index + 1}. {fav.title_display || fav.title || 'Unknown'}
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                          {fav.artist_name || fav.artist || 'Unknown Artist'}
+                          {isCurrentlyPlaying && <span style={{ color: '#0070f3', marginLeft: '0.5rem' }}>(Playing)</span>}
+                          {isNext && <span style={{ color: '#666', marginLeft: '0.5rem' }}>(Next)</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                        <button
+                          onClick={() => reorderMusicQueue(index, Math.max(0, index - 1))}
+                          disabled={index === 0}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.85rem',
+                            background: index === 0 ? '#f0f0f0' : '#fff',
+                            border: '1px solid #e0e0e0',
+                            borderRadius: '4px',
+                            cursor: index === 0 ? 'not-allowed' : 'pointer',
+                            opacity: index === 0 ? 0.5 : 1,
+                          }}
+                          title="Move up"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() => reorderMusicQueue(index, Math.min(musicQueue.length - 1, index + 1))}
+                          disabled={index === musicQueue.length - 1}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.85rem',
+                            background: index === musicQueue.length - 1 ? '#f0f0f0' : '#fff',
+                            border: '1px solid #e0e0e0',
+                            borderRadius: '4px',
+                            cursor: index === musicQueue.length - 1 ? 'not-allowed' : 'pointer',
+                            opacity: index === musicQueue.length - 1 ? 0.5 : 1,
+                          }}
+                          title="Move down"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          onClick={() => removeFromMusicQueue(index)}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.85rem',
+                            background: '#dc3545',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                          }}
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={playMusicQueue}
+                  disabled={musicQueue.length === 0 || (isPlayingMusic && currentPlayingIndex !== null)}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    background: isPlayingMusic && currentPlayingIndex !== null ? '#28a745' : '#0070f3',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: musicQueue.length === 0 ? 'not-allowed' : 'pointer',
+                    opacity: musicQueue.length === 0 ? 0.5 : 1,
+                    fontWeight: 'bold',
+                  }}
+                >
+                  ▶ Play Music
+                </button>
+                {isPlayingMusic && currentPlayingIndex !== null && (
+                  <button
+                    onClick={pauseMusicPlayback}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      fontSize: '1rem',
+                      background: '#ffc107',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    ⏸ Pause
+                  </button>
+                )}
+                {isPlayingMusic && currentPlayingIndex !== null && (
+                  <button
+                    onClick={playNextInMusicQueue}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      fontSize: '1rem',
+                      background: '#17a2b8',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    ⏭ Next
+                  </button>
+                )}
+                <button
+                  onClick={clearMusicQueue}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    background: '#6c757d',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  Clear Queue
+                </button>
+              </div>
+            </div>
+          )}
           
           <h3 style={{ fontSize: '1.2rem', marginBottom: '1rem', fontWeight: 'bold', color: '#333' }}>
             ❤️ Your Favorite Songs
@@ -2783,12 +3271,12 @@ export default function RoomPage() {
                           if (!room || !user) return;
                           
                           if (isYouTube && version.youtube_url) {
-                            // Add YouTube song to queue
-                            console.log('[Favorites] Add to Queue clicked for YouTube URL:', version.youtube_url);
+                            // Add YouTube song to karaoke queue
+                            console.log('[Favorites] Add to Karaoke clicked for YouTube URL:', version.youtube_url);
                             await handleAddYouTubeUrlFromString(version.youtube_url);
                           } else {
-                            // Add database song to queue
-                            console.log('[Favorites] Add to Queue clicked for version_id:', version.id);
+                            // Add database song to karaoke queue
+                            console.log('[Favorites] Add to Karaoke clicked for version_id:', version.id);
                             await handleAddVersionToQueue(version.id);
                           }
                         }}
@@ -2797,8 +3285,34 @@ export default function RoomPage() {
                           fontSize: '0.9rem',
                         }}
                       >
-                        Add to Queue
+                        Add to Karaoke
                       </button>
+                      {isYouTube && version.youtube_url && (
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => {
+                            // Add to music queue (foreground playback)
+                            const song: MusicQueueItem = {
+                              id: version.id,
+                              title: version.title_display || version.title || 'Unknown',
+                              title_display: version.title_display || version.title || 'Unknown',
+                              artist: version.artist_name || version.artist || 'Unknown Artist',
+                              artist_name: version.artist_name || version.artist || 'Unknown Artist',
+                              youtube_url: version.youtube_url,
+                              source_type: 'youtube',
+                            };
+                            addToMusicQueue(song);
+                          }}
+                          style={{ 
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.9rem',
+                            background: '#28a745',
+                            color: '#fff',
+                          }}
+                        >
+                          Add to Music
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -2831,8 +3345,180 @@ export default function RoomPage() {
         </div>
       )}
 
+      {/* Music Player - Visible at bottom when playing */}
+      {musicQueue.length > 0 && currentPlayingIndex !== null && musicQueue[currentPlayingIndex]?.youtube_url && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: '#000',
+            zIndex: 1000,
+            borderTop: '2px solid #0070f3',
+            padding: '1rem',
+          }}
+        >
+          <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <div style={{ color: '#fff', fontWeight: 'bold' }}>
+                🎵 Now Playing: {musicQueue[currentPlayingIndex]?.title_display || musicQueue[currentPlayingIndex]?.title || 'Unknown'}
+              </div>
+              <button
+                onClick={() => {
+                  setCurrentPlayingIndex(null);
+                  setIsPlayingMusic(false);
+                  isPlayingMusicRef.current = false;
+                  if (favoritePlayerRef.current) {
+                    favoritePlayerRef.current.stopVideo();
+                  }
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div
+              ref={favoritePlayerContainerRef}
+              style={{
+                width: '100%',
+                aspectRatio: '16/9',
+                maxHeight: '400px',
+                background: '#000',
+                // Android: Always render container (don't use display:none) to avoid embedding issues
+                display: currentPlayingIndex !== null ? 'block' : (isAndroid() ? 'block' : 'none'),
+                visibility: currentPlayingIndex !== null ? 'visible' : (isAndroid() ? 'hidden' : 'hidden'),
+                // Android: Ensure container has dimensions even when hidden
+                minHeight: isAndroid() ? '180px' : 'auto',
+                minWidth: isAndroid() ? '320px' : 'auto',
+              }}
+            >
+              <YouTubePlayer
+                key={`music-player-${currentPlayingIndex}-${musicQueue[currentPlayingIndex].id}`}
+                videoUrl={musicQueue[currentPlayingIndex].youtube_url}
+                autoPlay={false}
+                controls={true}
+                onReady={handleMusicPlayerReady}
+                onEnded={handleMusicPlayerEnded}
+                onStateChange={handleMusicPlayerStateChange}
+                onError={handleMusicPlayerError}
+                width="100%"
+                height="100%"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notifications */}
       <ToastContainer />
+      
+      {/* Android Debug Panel */}
+      {isAndroid() && (
+        <>
+          <button
+            onClick={() => setShowDebugPanel(!showDebugPanel)}
+            style={{
+              position: 'fixed',
+              top: '10px',
+              right: '10px',
+              zIndex: 10000,
+              background: showDebugPanel ? '#ff4444' : '#0070f3',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '8px 12px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+          >
+            {showDebugPanel ? 'Hide Debug' : 'Show Debug'}
+          </button>
+          
+          {showDebugPanel && (
+            <div
+              style={{
+                position: 'fixed',
+                top: '50px',
+                right: '10px',
+                width: '90%',
+                maxWidth: '400px',
+                maxHeight: '60vh',
+                background: '#1a1a1a',
+                color: '#0f0',
+                border: '2px solid #0070f3',
+                borderRadius: '8px',
+                padding: '12px',
+                zIndex: 10000,
+                overflow: 'auto',
+                fontFamily: 'monospace',
+                fontSize: '10px',
+                lineHeight: '1.4',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+                <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>
+                  🐛 Android Debug Logs
+                </div>
+                <button
+                  onClick={() => {
+                    debugLogsRef.current = [];
+                    setDebugLogs([]);
+                  }}
+                  style={{
+                    background: '#ff4444',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div style={{ color: '#888', fontSize: '9px', marginBottom: '8px' }}>
+                Origin: {typeof window !== 'undefined' ? window.location.origin : 'N/A'}
+              </div>
+              <div style={{ color: '#888', fontSize: '9px', marginBottom: '8px' }}>
+                URL: {typeof window !== 'undefined' ? window.location.href : 'N/A'}
+              </div>
+              <div style={{ borderTop: '1px solid #333', paddingTop: '8px', maxHeight: '50vh', overflow: 'auto' }}>
+                {debugLogs.length === 0 ? (
+                  <div style={{ color: '#666', fontStyle: 'italic' }}>No logs yet...</div>
+                ) : (
+                  debugLogs.map((log, idx) => {
+                    const isError = log.includes('[ERROR]');
+                    const isWarn = log.includes('[WARN]');
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          color: isError ? '#ff6b6b' : isWarn ? '#ffd93d' : '#0f0',
+                          marginBottom: '4px',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {log}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Confirmation Modal for Remove */}
       {showConfirmRemove && pendingRemove && (

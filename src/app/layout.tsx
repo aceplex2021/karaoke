@@ -41,6 +41,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        {/* Referrer Policy - Force origin-only for YouTube embedding (Android fix) */}
+        <meta name="referrer" content="origin" />
+        
         {/* PWA Meta Tags */}
         <meta name="application-name" content="Kara" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
