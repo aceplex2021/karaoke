@@ -353,6 +353,10 @@ export function YouTubePlayer({
   const handleReady = (event: any) => {
     console.log('[YouTubePlayer] Player ready');
     setIsReady(true);
+    // Prefer event.target — constructor return is not always usable for getCurrentTime/getDuration
+    if (event?.target) {
+      playerRef.current = event.target;
+    }
     
     // Android: Access iframe after creation and set referrer policy
     if (isAndroid() && containerRef.current) {
@@ -430,7 +434,14 @@ export function YouTubePlayer({
         const currentTime = playerRef.current.getCurrentTime();
         const duration = playerRef.current.getDuration();
         const cb = onTimeUpdateRef.current;
-        if (cb && typeof currentTime === 'number' && typeof duration === 'number') {
+        if (
+          cb &&
+          typeof currentTime === 'number' &&
+          typeof duration === 'number' &&
+          Number.isFinite(currentTime) &&
+          Number.isFinite(duration) &&
+          duration > 0
+        ) {
           cb(currentTime, duration);
         }
       }

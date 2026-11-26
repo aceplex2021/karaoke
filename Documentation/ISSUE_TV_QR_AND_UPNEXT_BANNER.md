@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Issue ID** | `TV-QR-UPNEXT-001` |
-| **Status** | FIXED (pending verify) |
+| **Status** | DEPLOYED to kara2.4voice.ai 2026-11-26 |
 | **Created** | 2026-11-26 |
 | **Files** | `src/app/tv/page.tsx`, `src/app/globals.css` |
 

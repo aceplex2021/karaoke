@@ -263,20 +263,38 @@ select {
   }
 }
 
-/* TV Up Next flying banner (must be global — inline animation names don't match styled-jsx hashes) */
+/* TV Up Next flying banner (global CSS — must not use styled-jsx hashed keyframes) */
 @keyframes kara-scroll-left {
   from {
-    transform: translateX(0);
+    transform: translateX(100vw);
   }
   to {
     transform: translateX(-100%);
   }
 }
 
+.kara-upnext-track {
+  overflow: hidden;
+  width: 100%;
+}
+
 .kara-upnext-marquee {
   display: inline-block;
   white-space: nowrap;
-  padding-left: 100%;
-  animation: kara-scroll-left 15s linear infinite;
+  will-change: transform;
+  animation: kara-scroll-left 14s linear infinite;
+}
+
+.kara-upnext-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 1rem;
+  background: linear-gradient(135deg, rgba(0, 255, 0, 0.95) 0%, rgba(0, 200, 0, 0.95) 100%);
+  color: #000;
+  padding: 1rem 2rem;
+  border-radius: 50px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  font-size: 1.5rem;
+  font-weight: bold;
 }
 

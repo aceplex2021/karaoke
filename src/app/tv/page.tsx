@@ -213,31 +213,37 @@ function TVModePageContent() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // v4.8.0: Reset banner when UP NEXT changes (time/duration handled by player callbacks)
+  // Reset progress when the playing queue item changes (YouTube remounts don't clear parent state)
   useEffect(() => {
-    if (upNext?.id) {
-      console.log('[tv] 🔄 Up next changed - resetting banner for:', upNext.id);
-      setShowUpNextBanner(false);
-    }
-  }, [upNext?.id]);
+    setCurrentTime(0);
+    setDuration(0);
+    setShowUpNextBanner(false);
+  }, [currentSong?.id]);
 
-  // v4.7.1: Update Up Next banner visibility (fixed infinite loop - removed showUpNextBanner from deps)
+  // Up Next banner: last 90s when there is a queued next singer
+  // Do not gate on needsUserInteraction (YouTube path never clears it the same way as HTML5)
   useEffect(() => {
-    if (!upNext || !currentSong || needsUserInteraction || duration <= 0 || currentTime <= 0) {
+    if (!upNext || !currentSong) {
       setShowUpNextBanner(false);
       return;
     }
-    
-    const timeRemaining = duration - currentTime;
-    const shouldShow = timeRemaining > 0 && timeRemaining <= 60;
-    
-    setShowUpNextBanner(shouldShow);
-    
-    // Only log once when banner activates (not every second)
-    if (shouldShow && timeRemaining > 59 && timeRemaining < 60.5) {
-      console.log('[tv] 🎵 Up Next banner activated - time remaining: ~60s');
+    if (!Number.isFinite(duration) || !Number.isFinite(currentTime) || duration <= 0) {
+      setShowUpNextBanner(false);
+      return;
     }
-  }, [currentTime, duration, upNext, currentSong, needsUserInteraction]);
+
+    const timeRemaining = duration - currentTime;
+    const shouldShow = timeRemaining > 0.5 && timeRemaining <= 90;
+    setShowUpNextBanner(shouldShow);
+
+    if (shouldShow && timeRemaining > 89 && timeRemaining <= 90.5) {
+      console.log('[tv] Up Next banner on — remaining ~90s', {
+        title: upNext.title,
+        singer: upNext.user_name,
+        timeRemaining,
+      });
+    }
+  }, [currentTime, duration, upNext, currentSong]);
 
   // v4.6.0: Sidebar removed - QR code now always visible
 
@@ -961,10 +967,8 @@ function TVModePageContent() {
               handlePlaybackError();
             }}
             onTimeUpdate={(current, dur) => {
-              setCurrentTime(current);
-              if (dur && dur > 0) {
-                setDuration(dur);
-              }
+              if (Number.isFinite(current)) setCurrentTime(current);
+              if (Number.isFinite(dur) && dur > 0) setDuration(dur);
             }}
             autoPlay={true}
             muted={!isPrimaryTV}
@@ -1161,36 +1165,23 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Up Next Flying Banner - global CSS keyframes (styled-jsx hashes break inline animation names) */}
+      {/* Up Next Flying Banner — above YouTube iframe (high z-index) */}
       {showUpNextBanner && upNext && (
         <div
+          className="kara-upnext-track"
           style={{
             position: 'absolute',
-            top: '1rem',
+            top: '1.25rem',
             left: 0,
             right: 0,
-            overflow: 'hidden',
-            zIndex: 900,
+            zIndex: 3500,
             pointerEvents: 'none',
           }}
         >
           <div className="kara-upnext-marquee">
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '1rem',
-                background: 'linear-gradient(135deg, rgba(0, 255, 0, 0.95) 0%, rgba(0, 200, 0, 0.95) 100%)',
-                color: '#000',
-                padding: '1rem 2rem',
-                borderRadius: '50px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                fontSize: '1.5rem',
-                fontWeight: 'bold',
-              }}
-            >
+            <div className="kara-upnext-pill">
               <span style={{ fontSize: '2rem' }}>🎵</span>
-              <span style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: '900' }}>UP NEXT:</span>
+              <span style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 900 }}>UP NEXT:</span>
               <span>{upNext.title || 'Unknown Song'}</span>
               <span style={{ fontSize: '1.8rem' }}>👤</span>
               <span>{upNext.user_name || 'Guest'}</span>
