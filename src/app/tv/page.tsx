@@ -1161,7 +1161,7 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Up Next Flying Banner - Scrolling marquee at top center (v4.5.1: stable visibility, no flickering) */}
+      {/* Up Next Flying Banner - global CSS keyframes (styled-jsx hashes break inline animation names) */}
       {showUpNextBanner && upNext && (
         <div
           style={{
@@ -1174,14 +1174,7 @@ function TVModePageContent() {
             pointerEvents: 'none',
           }}
         >
-          <div
-            style={{
-              display: 'inline-block',
-              whiteSpace: 'nowrap',
-              animation: 'scrollLeft 15s linear infinite',
-              paddingLeft: '100%',
-            }}
-          >
+          <div className="kara-upnext-marquee">
             <div
               style={{
                 display: 'inline-flex',
@@ -1205,17 +1198,6 @@ function TVModePageContent() {
           </div>
         </div>
       )}
-
-      <style jsx>{`
-        @keyframes scrollLeft {
-          from {
-            transform: translateX(0);
-          }
-          to {
-            transform: translateX(-100%);
-          }
-        }
-      `}</style>
 
       {/* Controls Overlay - YouTube style (v3.5 only, hidden for v4.0 YouTube mode) */}
       {showControls && currentSong && !needsUserInteraction && !isYouTubeSong && (
@@ -1480,13 +1462,14 @@ function TVModePageContent() {
       )}
       </div>
 
-      {/* v4.7.1: QR Code - Always visible, top-right, larger size, code above */}
+      {/* QR Code - middle-right, room code above */}
       {room && (
         <div
           style={{
             position: 'absolute',
-            top: '1rem',
+            top: '50%',
             right: '1rem',
+            transform: 'translateY(-50%)',
             zIndex: 600,
             background: 'rgba(255,255,255,0.95)',
             padding: '0.5rem',

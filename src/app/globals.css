@@ -263,3 +263,20 @@ select {
   }
 }
 
+/* TV Up Next flying banner (must be global — inline animation names don't match styled-jsx hashes) */
+@keyframes kara-scroll-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+.kara-upnext-marquee {
+  display: inline-block;
+  white-space: nowrap;
+  padding-left: 100%;
+  animation: kara-scroll-left 15s linear infinite;
+}
+

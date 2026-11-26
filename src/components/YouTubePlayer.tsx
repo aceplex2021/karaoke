@@ -101,8 +101,14 @@ export function YouTubePlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep latest time callback without restarting the YT progress interval
+  useEffect(() => {
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
 
   // Extract video ID
   const videoId = extractYouTubeId(videoUrl);
@@ -415,16 +421,17 @@ export function YouTubePlayer({
       onReady(event);
     }
 
-    // Start time update interval
+    // Start time update interval (uses ref so TV banner always gets live progress)
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
     intervalRef.current = setInterval(() => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         const currentTime = playerRef.current.getCurrentTime();
         const duration = playerRef.current.getDuration();
-        
-        // Always call onTimeUpdate even if currentTime or duration is 0
-        // This ensures the TV page always has accurate values
-        if (onTimeUpdate && typeof currentTime === 'number' && typeof duration === 'number') {
-          onTimeUpdate(currentTime, duration);
+        const cb = onTimeUpdateRef.current;
+        if (cb && typeof currentTime === 'number' && typeof duration === 'number') {
+          cb(currentTime, duration);
         }
       }
     }, 500); // Update every 500ms
