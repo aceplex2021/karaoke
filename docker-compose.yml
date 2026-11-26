@@ -1,0 +1,50 @@
+# Kara2 production stack on PVE B LXC
+# Publishes https://kara2.4voice.ai via Cloudflare Tunnel (see Documentation/ISSUE_KARA2_CF_TUNNEL.md)
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_COMMERCIAL_MODE: ${NEXT_PUBLIC_COMMERCIAL_MODE:-true}
+        SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    restart: unless-stopped
+    # LAN smoke-test access; public traffic goes through cloudflared (no host publish required)
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
+    # http2 avoids QUIC/UDP issues behind NAT/pfSense (same as trading)
+    # Ingress is in cloudflared/config.yml (CLI-created tunnel + DNS CNAME)
+    command:
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "--protocol",
+        "http2",
+        "--config",
+        "/etc/cloudflared/config.yml",
+        "run",
+      ]

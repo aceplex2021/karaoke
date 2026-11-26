@@ -1,0 +1,9 @@
+# Cloudflare Tunnel config for kara2.4voice.ai
+# Credentials file is deployed to the LXC only (not committed).
+tunnel: d4f2b782-10f2-4264-9c4c-c150b929f54c
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: kara2.4voice.ai
+    service: http://web:3000
+  - service: http_status:404

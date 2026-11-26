@@ -1,13 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Allow cross-origin requests from local network devices and ngrok
+  // Production Docker image uses Next standalone output
+  output: 'standalone',
+  // Allow cross-origin requests from local network devices and ngrok (dev only)
   // UPDATE THIS when your ngrok domain changes!
   allowedDevOrigins: [
     '10.0.29.228', 
     '10.0.0.0/8',
     '192.168.0.0/16',
     '98408f91f910.ngrok-free.app', // ✅ Your current ngrok domain
+    'kara2.4voice.ai',
   ],
   
   // ENFORCE: No caching for API routes (state apps need fresh data)

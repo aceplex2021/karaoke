@@ -25,6 +25,10 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Cloudflare tunnel credentials (deploy to LXC only)
+cloudflared/credentials.json
+*.tunnel.json
+
 # IDE
 .vscode/
 .idea/
