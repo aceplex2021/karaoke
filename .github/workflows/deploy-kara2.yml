@@ -1,0 +1,62 @@
+# Deploy kara2 stack on push to main.
+# Runs on a SELF-HOSTED runner on the LAN (kara2 LXC or PVE B).
+# GitHub-hosted runners cannot reach 10.0.19.x.
+#
+# Setup: Documentation/GITHUB_ACTIONS_KARA2.md
+name: Deploy kara2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-kara2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, kara2]
+    timeout-minutes: 30
+    steps:
+      - name: Sync repo and rebuild compose stack
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          REPO_DIR="${{ vars.KARA2_REPO_PATH || '/opt/kara2' }}"
+          mkdir -p "$REPO_DIR"
+          cd "$REPO_DIR"
+
+          if [ ! -d .git ]; then
+            echo "Initializing git clone in $REPO_DIR"
+            if [ -n "${GH_PAT:-}" ]; then
+              git clone "https://x-access-token:${GH_PAT}@github.com/aceplex2021/karaoke.git" /tmp/kara2-clone
+            else
+              git clone "https://github.com/aceplex2021/karaoke.git" /tmp/kara2-clone
+            fi
+            # Keep existing secrets/config if present
+            cp -a /tmp/kara2-clone/. "$REPO_DIR/"
+            rm -rf /tmp/kara2-clone
+          fi
+
+          if [ -n "${GH_PAT:-}" ]; then
+            git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/aceplex2021/karaoke.git"
+          fi
+
+          git fetch origin main
+          git reset --hard origin/main
+
+          if [ ! -f .env ]; then
+            echo "::error::Missing $REPO_DIR/.env — copy production env before deploying"
+            exit 1
+          fi
+          if [ ! -f cloudflared/credentials.json ]; then
+            echo "::error::Missing $REPO_DIR/cloudflared/credentials.json"
+            exit 1
+          fi
+          chmod 644 cloudflared/credentials.json cloudflared/config.yml || true
+
+          docker compose up -d --build --remove-orphans
+          docker compose ps
+          echo "Deployed $(git rev-parse --short HEAD) to kara2"
