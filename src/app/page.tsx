@@ -1,8 +1,6 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import { api } from '@/lib/api';
 import { CommercialOnly, PrivateOnly } from '@/components/FeatureToggle';
 
 export default function HomePage() {
@@ -74,7 +72,7 @@ function V4LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
             }}
           >
             <span style={{ fontSize: '1.5rem' }}>🎤</span>
-            <span>Create Room (Host)</span>
+            <span>Create Room (Host — Google sign-in)</span>
           </button>
 
           <button
@@ -279,40 +277,9 @@ function V4LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
  * Original room creation interface with database mode
  */
 function V3LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
-  const [roomName, setRoomName] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [queueMode, setQueueMode] = useState<'round_robin' | 'fifo'>('fifo');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleCreateRoom = async () => {
-    if (!roomName.trim()) {
-      setError('Room name is required');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const { room, user } = await api.createRoom({
-        room_name: roomName,
-        host_display_name: displayName || 'Host',
-        queue_mode: queueMode,
-      });
-
-      // Store room ID in localStorage for persistence (client-side only)
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('tv_room_id', room.id);
-        window.localStorage.setItem('tv_user_id', user?.id || room.host_id || '');
-      }
-
-      router.push(`/tv?roomId=${room.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create room');
-    } finally {
-      setLoading(false);
-    }
+  const handleCreateRoom = () => {
+    // Host create always goes through /create (Google sign-in gated)
+    router.push('/create');
   };
 
   const handleJoinRoom = () => {
@@ -329,115 +296,12 @@ function V3LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
           🎤 Karaoke Web App
         </h1>
 
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-            Room Name
-          </label>
-          <input
-            type="text"
-            className="input"
-            placeholder="My Party Room"
-            value={roomName}
-            onChange={(e) => setRoomName(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleCreateRoom()}
-          />
-        </div>
-
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-            Your Name (optional)
-          </label>
-          <input
-            type="text"
-            className="input"
-            placeholder="Host"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleCreateRoom()}
-          />
-        </div>
-
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: 600 }}>
-            Queue Ordering Mode
-          </label>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <label 
-              style={{ 
-                display: 'flex', 
-                alignItems: 'flex-start', 
-                cursor: 'pointer', 
-                padding: '0.75rem', 
-                border: '1px solid #ddd', 
-                borderRadius: '4px', 
-                backgroundColor: queueMode === 'fifo' ? '#f0f8ff' : 'transparent',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              <input
-                type="radio"
-                name="queueMode"
-                value="fifo"
-                checked={queueMode === 'fifo'}
-                onChange={(e) => setQueueMode(e.target.value as 'fifo')}
-                style={{ marginRight: '0.5rem', marginTop: '0.2rem', cursor: 'pointer' }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                  First Come First Serve
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                  Songs play in the order they were added. Simple and straightforward.
-                </div>
-              </div>
-            </label>
-            
-            <label 
-              style={{ 
-                display: 'flex', 
-                alignItems: 'flex-start', 
-                cursor: 'pointer', 
-                padding: '0.75rem', 
-                border: '1px solid #ddd', 
-                borderRadius: '4px', 
-                backgroundColor: queueMode === 'round_robin' ? '#f0f8ff' : 'transparent',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              <input
-                type="radio"
-                name="queueMode"
-                value="round_robin"
-                checked={queueMode === 'round_robin'}
-                onChange={(e) => setQueueMode(e.target.value as 'round_robin')}
-                style={{ marginRight: '0.5rem', marginTop: '0.2rem', cursor: 'pointer' }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                  Round Robin (Fair Rotation)
-                </div>
-                <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                  Each person gets one turn before anyone sings again. Ensures everyone gets equal opportunities.
-                </div>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        {error && (
-          <div style={{ color: '#e00', marginBottom: '1rem', fontSize: '0.9rem' }}>
-            {error}
-          </div>
-        )}
-
         <button
           className="btn btn-primary"
           onClick={handleCreateRoom}
-          disabled={loading}
           style={{ width: '100%', marginBottom: '1rem' }}
         >
-          {loading ? 'Creating...' : 'Create Room (TV Mode)'}
+          Create Room (Host — Google sign-in)
         </button>
 
         <div style={{ textAlign: 'center', margin: '1.5rem 0', color: '#666' }}>

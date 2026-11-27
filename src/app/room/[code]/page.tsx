@@ -15,6 +15,7 @@ import { SearchRedirect } from '@/components/SearchRedirect';
 import { appConfig } from '@/lib/config';
 import { YouTubePlayer } from '@/components/YouTubePlayer';
 import { extractYouTubeId } from '@/lib/youtube';
+import { youtubeFavoriteKey } from '@/lib/favorite-keys';
 
 // ====================================
 // VERSION DISPLAY HELPERS
@@ -603,6 +604,9 @@ export default function RoomPage() {
   const realtimeUnsubRef = useRef<(() => void) | null>(null); // Phase B: SSE unsub
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Reconnection attempts counter
   const hasCheckedNameRef = useRef(false); // Fix: Prevent double execution in React Strict Mode
+  const sseRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
   
   // Foreground Playback - Player refs
   const favoritePlayerRef = useRef<any>(null);
@@ -652,52 +656,54 @@ export default function RoomPage() {
    * No local queue math - backend is single source of truth
    */
   const refreshRoomState = useCallback(async (roomId: string) => {
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
     try {
-      // Phase 2.1: Pass userId for activity tracking
-      const state = await api.getRoomState(roomId, user?.id);
-      setRoom(state.room);
-      setQueue(state.queue); // Ledger order (all pending items, by position)
-      setUpNext(state.upNext); // Turn order (next to play via round-robin, read-only, informational)
-      setCurrentSong(state.currentSong); // Currently playing (if any)
-      // v5.0: Update primary TV ID and connected TVs state
-      setPrimaryTvId(state.room.primary_tv_id || null);
-      // Parse connected_tv_ids JSONB array
-      const connectedTvs = (state.room as any).connected_tv_ids;
-      let parsedTvIds: string[] = [];
-      if (Array.isArray(connectedTvs)) {
-        parsedTvIds = connectedTvs;
-        setConnectedTvIds(parsedTvIds);
-      } else if (connectedTvs) {
-        // Handle JSONB format
+      do {
+        refreshPendingRef.current = false;
         try {
-          const parsed = typeof connectedTvs === 'string' ? JSON.parse(connectedTvs) : connectedTvs;
-          parsedTvIds = Array.isArray(parsed) ? parsed : [];
-          setConnectedTvIds(parsedTvIds);
-        } catch {
-          setConnectedTvIds([]);
+          const state = await api.getRoomState(roomId, user?.id);
+          setRoom(state.room);
+          setQueue(state.queue);
+          setUpNext(state.upNext);
+          setCurrentSong(state.currentSong);
+          setPrimaryTvId(state.room.primary_tv_id || null);
+          const connectedTvs = (state.room as any).connected_tv_ids;
+          if (Array.isArray(connectedTvs)) {
+            setConnectedTvIds(connectedTvs);
+          } else if (connectedTvs) {
+            try {
+              const parsed =
+                typeof connectedTvs === 'string' ? JSON.parse(connectedTvs) : connectedTvs;
+              setConnectedTvIds(Array.isArray(parsed) ? parsed : []);
+            } catch {
+              setConnectedTvIds([]);
+            }
+          } else {
+            setConnectedTvIds([]);
+          }
+        } catch (err: any) {
+          console.error('[room] Failed to refresh room state:', err);
+          if (err.status === 410 || err.status === 404) {
+            stopAllUpdates();
+            setError(
+              err.status === 410
+                ? 'Room expired.'
+                : 'Room not found. Check the room code and try again.'
+            );
+            setShowGoHomeButton(true);
+            setRoom(null);
+            setCurrentSong(null);
+          } else {
+            setError(err.message || 'Failed to refresh room state');
+          }
         }
-      } else {
-        setConnectedTvIds([]);
-      }
-      console.log('[room] refreshRoomState done - queue:', state.queue.length, 'upNext:', state.upNext?.song?.title || 'none', 'current:', state.currentSong?.song?.title || 'none', 'connected TVs:', parsedTvIds.length);
-    } catch (err: any) {
-      console.error('[room] Failed to refresh room state:', err);
-      // Phase 1: Check if it's a room expiry error (410 or 404)
-      if (err.status === 410 || err.status === 404) {
-        // Stop all polling and real-time subscriptions to prevent repeated errors
-        stopAllUpdates();
-        setError(
-          err.status === 410
-            ? 'Room expired.'
-            : 'Room not found. Check the room code and try again.'
-        );
-        setShowGoHomeButton(true);
-        setRoom(null);
-        setCurrentSong(null);
-      } else {
-        // Real app error - preserve original message for troubleshooting
-        setError(err.message || 'Failed to refresh room state');
-      }
+      } while (refreshPendingRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [user?.id, stopAllUpdates]);
 
@@ -738,8 +744,10 @@ export default function RoomPage() {
         }
       },
       onRoom: () => {
-        console.log('[room] SSE: room/queue change');
-        refreshRoomState(roomId);
+        if (sseRefreshTimerRef.current) clearTimeout(sseRefreshTimerRef.current);
+        sseRefreshTimerRef.current = setTimeout(() => {
+          refreshRoomState(roomId);
+        }, 500);
       },
       onError: () => {
         errorCount += 1;
@@ -754,7 +762,13 @@ export default function RoomPage() {
       },
     });
 
-    realtimeUnsubRef.current = unsub;
+    realtimeUnsubRef.current = () => {
+      if (sseRefreshTimerRef.current) {
+        clearTimeout(sseRefreshTimerRef.current);
+        sseRefreshTimerRef.current = null;
+      }
+      unsub();
+    };
   }, [refreshRoomState, startPolling, showError]);
 
   /**
@@ -968,15 +982,17 @@ export default function RoomPage() {
     }
   }, [user, showError]);
 
-  // Toggle favorite status for a song
-  const toggleFavorite = useCallback(async (songId: string) => {
+  // Toggle favorite status for a song (YouTube → stable youtube:VIDEO_ID)
+  const toggleFavorite = useCallback(async (
+    songId: string,
+    opts?: { youtube_url?: string; title?: string }
+  ) => {
     if (!user) return;
     
     try {
       const isFavorite = favoriteSongIds.has(songId);
       
       if (isFavorite) {
-        // Remove from favorites
         await api.removeFavorite(user.id, songId);
         setFavoriteSongIds(prev => {
           const next = new Set(prev);
@@ -986,16 +1002,18 @@ export default function RoomPage() {
         setFavorites(prev => prev.filter(song => song.id !== songId));
         success('Removed from favorites');
       } else {
-        // Add to favorites
-        await api.addFavorite(user.id, songId);
-        setFavoriteSongIds(prev => new Set(prev).add(songId));
+        const result = await api.addFavorite(user.id, songId, opts);
+        const storedId = result.favorite_id || songId;
+        setFavoriteSongIds(prev => new Set(prev).add(storedId));
         success('Added to favorites');
+        // Refresh list so title/url resolve under stable id
+        fetchFavorites();
       }
     } catch (error) {
       console.error('Failed to toggle favorite:', error);
       showError('Failed to update favorite');
     }
-  }, [user, favoriteSongIds, success, showError]);
+  }, [user, favoriteSongIds, success, showError, fetchFavorites]);
 
   // ====================================
   // FOREGROUND PLAYBACK - MUSIC QUEUE
@@ -1698,7 +1716,7 @@ export default function RoomPage() {
     try {
       console.log('[handleRemoveFromQueue] Removing:', { queueItemId: id, songTitle: title, userId: user.id });
 
-      await api.removeQueueItem(id, user.id);
+      await api.removeQueueItem(id, user.id, room?.id);
 
       // Show success toast
       success(`Removed "${title}" from queue`);
@@ -2688,7 +2706,9 @@ export default function RoomPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {history.map((item) => {
                 const isYouTube = item.source_type === 'youtube' || item.youtube_url;
-                const favoriteId = isYouTube ? item.id : item.version_id; // Use queue_item_id for YouTube, version_id for database
+                const favoriteId = isYouTube
+                  ? (youtubeFavoriteKey(item.youtube_url || '') || item.id)
+                  : item.version_id;
                 
                 return (
                   <div 
@@ -2730,7 +2750,13 @@ export default function RoomPage() {
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button
-                        onClick={() => favoriteId && toggleFavorite(favoriteId)}
+                        onClick={() =>
+                          favoriteId &&
+                          toggleFavorite(favoriteId, {
+                            youtube_url: item.youtube_url || undefined,
+                            title: item.song?.title || undefined,
+                          })
+                        }
                         style={{
                           background: 'none',
                           border: 'none',
@@ -2745,9 +2771,13 @@ export default function RoomPage() {
                         onMouseLeave={(e) => {
                           e.currentTarget.style.transform = 'scale(1)';
                         }}
-                        title={favoriteSongIds.has(favoriteId) ? 'Remove from favorites' : 'Add to favorites'}
+                        title={
+                          favoriteId && favoriteSongIds.has(favoriteId)
+                            ? 'Remove from favorites'
+                            : 'Add to favorites'
+                        }
                       >
-                        {favoriteSongIds.has(favoriteId) ? '❤️' : '🤍'}
+                        {favoriteId && favoriteSongIds.has(favoriteId) ? '❤️' : '🤍'}
                       </button>
                       <button
                         onClick={async () => {

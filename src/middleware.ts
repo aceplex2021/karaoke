@@ -11,5 +11,13 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ['/join/:path*', '/create/:path*', '/room/:path*', '/share-target/:path*'],
+  matcher: [
+    '/join',
+    '/join/:path*',
+    '/create',
+    '/create/:path*',
+    '/room/:path*',
+    '/share-target',
+    '/share-target/:path*',
+  ],
 };

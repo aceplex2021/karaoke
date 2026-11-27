@@ -61,34 +61,28 @@ export async function DELETE(
       );
     }
     
-    // Security: Check if user is authorized to delete this item
-    let isAuthorized = false;
-    
-    // Option 1: User is removing their own song
-    if (queueItem.user_id === user_id) {
-      isAuthorized = true;
-      console.log('[DELETE queue/item] User is removing their own song');
-    }
-    
-    // Option 2: User is the host (if room_id query param is provided)
-    if (!isAuthorized && roomIdParam) {
-      const { data: room, error: roomError } = await supabaseAdmin
-        .from('kara_rooms')
-        .select('host_id')
-        .eq('id', roomIdParam)
-        .single();
-      
-      if (!roomError && room && room.host_id === user_id) {
-        isAuthorized = true;
-        console.log('[DELETE queue/item] User is host, allowing deletion of any song');
+    // Security: own song OR host of the item's room (room_id query optional)
+    let isAuthorized = queueItem.user_id === user_id;
+    if (!isAuthorized) {
+      const roomId = roomIdParam || queueItem.room_id;
+      if (roomId) {
+        const { data: room } = await supabaseAdmin
+          .from('kara_rooms')
+          .select('host_id')
+          .eq('id', roomId)
+          .single();
+        if (room && room.host_id === user_id) {
+          isAuthorized = true;
+        }
       }
     }
-    
+
     if (!isAuthorized) {
       console.error('[DELETE queue/item] Unauthorized:', {
         queueItemUserId: queueItem.user_id,
         requestUserId: user_id,
         roomIdParam,
+        itemRoomId: queueItem.room_id,
       });
       return NextResponse.json(
         { success: false, error: 'You can only remove your own songs (or any song as host)' },

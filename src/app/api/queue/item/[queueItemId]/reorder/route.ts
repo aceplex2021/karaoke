@@ -50,12 +50,13 @@ export async function PATCH(
       );
     }
 
+    const roomId = room_id || queueItem.room_id;
     let isHost = false;
-    if (room_id) {
+    if (roomId) {
       const { data: room } = await supabaseAdmin
         .from('kara_rooms')
         .select('host_id')
-        .eq('id', room_id)
+        .eq('id', roomId)
         .single();
       isHost = !!(room && room.host_id === user_id);
     }

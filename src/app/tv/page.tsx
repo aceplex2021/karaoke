@@ -89,6 +89,8 @@ function TVModePageContent() {
   const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Real-time reconnection attempts counter
   const sseRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
   const lastUiTimeUpdateRef = useRef(0);
 
   useEffect(() => {
@@ -456,67 +458,56 @@ function TVModePageContent() {
    * Memoized with useCallback to ensure stable reference for debounced function
    */
   const refreshState = useCallback(async (roomId: string) => {
-    const requestId = ++requestIdRef.current;
-    console.log('[tv] refreshState called for room:', roomId);
+    // Coalesce: Smart TVs die when NOTIFY storms stack concurrent getRoomState calls
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
     try {
-      // Phase 2.1: Pass userId for activity tracking (if available)
-      const state = await api.getRoomState(roomId, tvUserId || undefined);
-      console.log('[tv] refreshState received state:', {
-        roomId: state.room.id,
-        current_entry_id: state.room.current_entry_id,
-        currentSong: state.currentSong ? { id: state.currentSong.id, title: state.currentSong.song?.title } : null,
-        queueLength: state.queue.length
-      });
-      
-      // DETAILED DEBUG: Show full currentSong structure
-      if (state.currentSong) {
-        console.log('[tv] FULL currentSong:', JSON.stringify(state.currentSong, null, 2));
-      }
-      
-      // v4.4: Check if song changed (new song started) - clear mid-song flag
-      if (initialEntryIdRef.current && state.room.current_entry_id !== initialEntryIdRef.current) {
-        console.log('[tv] ✅ New song started - clearing mid-song flag');
-        setJoinedMidSong(false);
-        initialEntryIdRef.current = null;
-      }
-      
-      // Only update if this is still the latest request
-      if (requestId === requestIdRef.current) {
-        console.log('[tv] refreshState current_entry_id:', state.room.current_entry_id);
-        const prevEntryId = roomRef.current?.current_entry_id;
-        setRoom(state.room);
-        roomRef.current = state.room;
-        // Always use currentSong from backend (based on room.current_entry_id)
-        // Do NOT pick current from queue ordering - backend is single source of truth
-        setCurrentSong(state.currentSong);
-        currentSongRef.current = state.currentSong;
-        setQueue(state.queue);
-        setUpNext(state.upNext);
-        // New song → refresh seek offset for multi-TV catch-up
-        if (state.room.current_entry_id !== prevEntryId) {
-          const offset = elapsedFromStartedAt(state.room.current_song_started_at);
-          setSeekOffsetSeconds(offset);
-          seekOffsetRef.current = offset;
+      do {
+        refreshPendingRef.current = false;
+        const requestId = ++requestIdRef.current;
+        try {
+          const state = await api.getRoomState(roomId, tvUserId || undefined);
+
+          if (initialEntryIdRef.current && state.room.current_entry_id !== initialEntryIdRef.current) {
+            setJoinedMidSong(false);
+            initialEntryIdRef.current = null;
+          }
+
+          if (requestId === requestIdRef.current) {
+            const prevEntryId = roomRef.current?.current_entry_id;
+            setRoom(state.room);
+            roomRef.current = state.room;
+            setCurrentSong(state.currentSong);
+            currentSongRef.current = state.currentSong;
+            setQueue(state.queue);
+            setUpNext(state.upNext);
+            if (state.room.current_entry_id !== prevEntryId) {
+              const offset = elapsedFromStartedAt(state.room.current_song_started_at);
+              setSeekOffsetSeconds(offset);
+              seekOffsetRef.current = offset;
+            }
+          }
+        } catch (err: any) {
+          if (requestId === requestIdRef.current) {
+            console.error('Failed to refresh room state:', err);
+            const isRoomExpired = err.status === 410 || err.status === 404;
+            if (isRoomExpired) {
+              setError('Room expired or doesn\'t exist. Host needs to create a new room.');
+              setShowGoHomeButton(true);
+              setRoom(null);
+              setCurrentSong(null);
+            } else {
+              setError(err.message || 'Failed to refresh room state');
+              setShowGoHomeButton(false);
+            }
+          }
         }
-        console.log('[tv] refreshState done', state.room.current_entry_id, state.queue.length, state.currentSong?.song?.title || 'no song');
-      }
-    } catch (err: any) {
-      // Only set error if this is still the latest request
-      if (requestId === requestIdRef.current) {
-        console.error('Failed to refresh room state:', err);
-        // Phase 1: Check if it's a room expiry error (410 or 404)
-        const isRoomExpired = err.status === 410 || err.status === 404;
-        if (isRoomExpired) {
-          setError('Room expired or doesn\'t exist. Host needs to create a new room.');
-          setShowGoHomeButton(true);
-          setRoom(null); // Clear room so full-screen error display shows
-          setCurrentSong(null); // Clear current song
-        } else {
-          // Real app error - preserve original message for troubleshooting
-          setError(err.message || 'Failed to refresh room state');
-          setShowGoHomeButton(false);
-        }
-      }
+      } while (refreshPendingRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, []); // Empty deps - only uses stable setState functions and refs
 
@@ -567,10 +558,10 @@ function TVModePageContent() {
         }
       },
       onRoom: () => {
-        // Debounce NOTIFY storms (advance + queue updates can fire many events)
+        // Debounce NOTIFY storms — longer on Smart TVs to avoid main-thread jank
+        const debounceMs = isConstrainedTvBrowser() ? 900 : 500;
         if (sseRefreshTimerRef.current) clearTimeout(sseRefreshTimerRef.current);
         sseRefreshTimerRef.current = setTimeout(() => {
-          console.log('[tv] SSE: room/queue change (debounced)');
           refreshState(roomId).then(() => {
             const currentTvId = localStorage.getItem('tv_id');
             const primaryId = roomRef.current?.primary_tv_id;
@@ -578,17 +569,10 @@ function TVModePageContent() {
               const isNowPrimary = primaryId === currentTvId;
               if (isNowPrimary !== isPrimaryTVRef.current) {
                 setIsPrimaryTV(isNowPrimary);
-                console.log(
-                  '[tv] Primary TV changed:',
-                  isNowPrimary ? 'PRIMARY' : 'SECONDARY',
-                  '(TV ID:',
-                  currentTvId.slice(0, 8),
-                  '...)'
-                );
               }
             }
           });
-        }, 350);
+        }, debounceMs);
       },
       onPlayhead: (payload) => {
         // Primary ignores playhead; skip work on the posting device (Samsung primary)

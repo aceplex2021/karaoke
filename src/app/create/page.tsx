@@ -18,13 +18,20 @@ import { CommercialOnly } from '@/components/FeatureToggle';
 
 export default function CreateRoomPage() {
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, status: authStatus } = useSession();
   const [roomName, setRoomName] = useState('');
   const [hostName, setHostName] = useState('');
   const [queueMode, setQueueMode] = useState<'round_robin' | 'fifo'>('round_robin');
   const [approvalMode, setApprovalMode] = useState<'auto' | 'approval'>('auto');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Hosts must Google sign-in before creating a room
+  useEffect(() => {
+    if (authStatus === 'unauthenticated') {
+      router.replace('/login?callbackUrl=/create');
+    }
+  }, [authStatus, router]);
 
   useEffect(() => {
     if (session?.user?.name && !hostName) {
@@ -33,6 +40,11 @@ export default function CreateRoomPage() {
   }, [session, hostName]);
 
   const handleCreateRoom = async () => {
+    if (authStatus !== 'authenticated' || !session?.karaUserId) {
+      router.replace('/login?callbackUrl=/create');
+      return;
+    }
+
     if (!roomName.trim()) {
       setError('Room name is required');
       return;
@@ -76,6 +88,21 @@ export default function CreateRoomPage() {
     }
   };
 
+  if (authStatus === 'loading' || authStatus === 'unauthenticated') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: '#fff',
+      }}>
+        <p>Checking Google sign-in…</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ 
       minHeight: '100vh', 
@@ -94,6 +121,11 @@ export default function CreateRoomPage() {
           <p style={{ color: '#666', fontSize: '0.95rem' }}>
             Set up your karaoke party
           </p>
+          {session?.user?.email && (
+            <p style={{ color: '#0070f3', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+              Signed in as {session.user.email}
+            </p>
+          )}
         </div>
 
         {/* Room Name */}

@@ -223,12 +223,18 @@ export const api = {
     return result;
   },
 
-  async removeQueueItem(queueItemId: string, userId: string): Promise<{ success: boolean; message: string }> {
-    console.log('[api] removeQueueItem request:', { queueItemId, userId });
-    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}`, {
+  async removeQueueItem(
+    queueItemId: string,
+    userId: string,
+    roomId?: string
+  ): Promise<{ success: boolean; message: string }> {
+    console.log('[api] removeQueueItem request:', { queueItemId, userId, roomId });
+    const qs = new URLSearchParams({ user_id: userId });
+    if (roomId) qs.set('room_id', roomId);
+    const res = await fetch(`${API_BASE}/queue/item/${queueItemId}?${qs.toString()}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify({ user_id: userId, room_id: roomId }),
     });
     console.log('[api] removeQueueItem response status:', res.status);
     if (!res.ok) {
@@ -396,20 +402,29 @@ export const api = {
     return res.json();
   },
 
-  async addFavorite(userId: string, songId: string): Promise<{ success: boolean; message: string }> {
+  async addFavorite(
+    userId: string,
+    songId: string,
+    opts?: { youtube_url?: string; title?: string }
+  ): Promise<{ success: boolean; message: string; favorite_id?: string }> {
     const res = await fetch(`${API_BASE}/users/${userId}/favorites`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ song_id: songId }),
+      body: JSON.stringify({
+        song_id: songId,
+        youtube_url: opts?.youtube_url,
+        title: opts?.title,
+      }),
     });
     if (!res.ok) throw new Error('Failed to add favorite');
     return res.json();
   },
 
   async removeFavorite(userId: string, songId: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch(`${API_BASE}/users/${userId}/favorites?songId=${songId}`, {
-      method: 'DELETE',
-    });
+    const res = await fetch(
+      `${API_BASE}/users/${userId}/favorites?songId=${encodeURIComponent(songId)}`,
+      { method: 'DELETE' }
+    );
     if (!res.ok) throw new Error('Failed to remove favorite');
     return res.json();
   },
