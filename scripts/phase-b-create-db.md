@@ -1,30 +1,56 @@
 # Phase B — Create local `karaoke` database
 
-## On Patroni primary (or via VIP as superuser)
+## Topology (current)
+
+| Role | Host | CT | IP |
+|------|------|----|----|
+| Patroni **leader** (writes) | pvetos `10.0.29.96` | 113 `pg-d` | `10.0.29.240` |
+| Sync standby | pve `10.0.19.210` | 1003 `Postgres` | `10.0.19.233` |
+| App VIP | HAProxy | — | `10.0.29.95:5432` |
+
+Confirm leader: `patronictl -c /etc/patroni/patroni.yml list` on either node.
+
+## Bootstrap (from karaoke repo)
 
 ```bash
-# 1) Create role + DB (edit password first in SQL file)
-psql -h 10.0.29.95 -U postgres -f database/phase_b_bootstrap.sql
+# 1) Set a real password in .env (not a placeholder ellipsis)
+node scripts/fix-database-url-password.mjs --force
 
-# 2) Apply schema + functions
-psql -h 10.0.29.95 -U kara_app -d karaoke -f database/phase_b_schema.sql
+# 2) Create role + DB on leader, patch standby hba, apply schema
+node scripts/phase-b-bootstrap-remote.mjs
 
-# 3) pg_hba.conf — allow kara_app from kara2 LAN, then reload
-# host karaoke kara_app 10.0.19.0/24 scram-sha-256
-# host karaoke kara_app 10.0.29.0/24 scram-sha-256
+# 3) Persist full pg_hba in Patroni DCS (trading + replication + karaoke)
+#    scp scripts/phase-b-fix-patroni-hba.sh to pvetos and:
+#    bash phase-b-fix-patroni-hba.sh 113
 
-# 4) kara2 .env
-# DATABASE_URL=postgresql://kara_app:PASSWORD@10.0.29.95:5432/karaoke
-
-# 5) Redeploy kara2 compose; smoke create room / TV / queue
+# 4) Verify
+node scripts/verify-database-url.mjs
+node scripts/phase-b-smoke.mjs
 ```
+
+## Cron (both Proxmox hosts)
+
+```bash
+# pvetos (pg-d)
+bash scripts/phase-b-install-cron.sh 113
+
+# pve (pg-b)
+bash scripts/phase-b-install-cron.sh 1003
+```
+
+Only the current primary executes maintenance (`pg_is_in_recovery` guard).
+
+## App env (kara2)
+
+```text
+DATABASE_URL=postgresql://kara_app:<pass>@10.0.29.95:5432/karaoke
+```
+
+Redeploy compose after setting `.env`. Unset `DATABASE_URL` to roll back to Supabase.
 
 ## Data copy from Supabase (cutover)
 
-```bash
-# Dump selected tables from Supabase, restore into karaoke
-# Prefer logical dump of catalog + users/history; cold-cut live rooms OK
-```
+Dump catalog + users/history from Supabase; restore into `karaoke`. Cold-cut live rooms is OK.
 
 ## Rollback
 

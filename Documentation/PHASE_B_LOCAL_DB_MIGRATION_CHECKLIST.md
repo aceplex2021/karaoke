@@ -95,15 +95,15 @@ Dump/check:
 
 ## 2. Infrastructure
 
-- [ ] Create role `kara_app` (login, strong password in secret store)
-- [ ] `CREATE DATABASE karaoke OWNER kara_app;` (or owned by postgres, grant to `kara_app`)
-- [ ] Grants: CONNECT, USAGE on schema, CRUD on `kara_*`, EXECUTE on needed functions
-- [ ] `pg_hba`: allow `kara_app` from kara2 subnet (`10.0.19.0/24` and/or `10.0.29.0/24`) via VIP
-- [ ] Apps connect only via **HAProxy VIP** `10.0.29.95:5432` (not raw primary IP)
-- [ ] Connectivity test from kara2 LXC: `psql` / Node `pg` smoke query
+- [x] Create role `kara_app` (login, strong password in secret store)
+- [x] `CREATE DATABASE karaoke OWNER kara_app;` (or owned by postgres, grant to `kara_app`)
+- [x] Grants: CONNECT, USAGE on schema, CRUD on `kara_*`, EXECUTE on needed functions
+- [x] `pg_hba`: allow `kara_app` from kara2 subnet (`10.0.19.0/24` and/or `10.0.29.0/24`) via VIP
+- [x] Apps connect only via **HAProxy VIP** `10.0.29.95:5432` (not raw primary IP)
+- [x] Connectivity test from kara2 LXC: `psql` / Node `pg` smoke query
 - [ ] Add `karaoke` to TrueNAS / nightly `pg_dump` job (or dedicated dump script + retention)
 - [ ] Document restore drill path
-- [ ] Optional: separate connection pooler limits so karaoke cannot starve trading
+- [x] Optional: separate connection pooler limits so karaoke cannot starve trading (`PG_POOL_MAX`)
 
 **Env contract (kara2):**
 
@@ -120,14 +120,14 @@ MEDIA_SERVER_URL=https://media.4voice.ai
 
 ## 3. Schema + functions on local PG
 
-- [ ] Produce **one** apply script from live dump (prefer `pg_dump --schema-only`) + Phase A deltas
-- [ ] Apply empty schema to `karaoke`
-- [ ] Port / create all required functions (§1.2)
-- [ ] Ensure `advance_playback` orders by **`sort_key`**, sets `current_song_started_at`, uses advisory lock
-- [ ] Ensure `calculate_round_robin_position` returns sort_key spacing compatible with adds
+- [x] Produce **one** apply script from live dump (prefer `pg_dump --schema-only`) + Phase A deltas
+- [x] Apply empty schema to `karaoke`
+- [x] Port / create all required functions (§1.2)
+- [x] Ensure `advance_playback` orders by **`sort_key`**, sets `current_song_started_at`, uses advisory lock
+- [x] Ensure `calculate_round_robin_position` returns sort_key spacing compatible with adds
 - [ ] FTS / unaccent / indexes for song search match prod
-- [ ] Seed `kara_languages` if needed
-- [ ] Schema verification query checklist (table list, function list, index list) saved in `database/` or runbook
+- [x] Seed `kara_languages` if needed
+- [x] Schema verification query checklist (table list, function list, index list) saved in `database/` or runbook
 
 **Repo anchors (may be incomplete vs prod):**
 
@@ -145,7 +145,7 @@ MEDIA_SERVER_URL=https://media.4voice.ai
 - [ ] Migrate all API routes under `src/app/api/**` off `supabaseAdmin`
 - [ ] Migrate server libs: `queue.ts`, `media-url-resolver.ts`, `queue-order.ts`
 - [ ] Move `set_primary_tv` + any browser DB reads behind API routes
-- [ ] Controller write path uses `DATABASE_URL`
+- [x] Controller write path uses `DATABASE_URL`
 - [ ] Remove `@supabase/supabase-js` from browser bundle for TV/room (or entire app when unused)
 - [ ] Typecheck + build green
 - [ ] Docker / kara2 image builds with new env (no required Supabase build args unless leftover)
@@ -171,10 +171,10 @@ Must replace **both**:
 
 ## 6. Cron / maintenance
 
-- [ ] `expire_old_rooms` scheduled locally
-- [ ] `cleanup_stale_participations` scheduled locally
+- [x] `expire_old_rooms` scheduled locally
+- [x] `cleanup_stale_participations` scheduled locally
 - [ ] Approval expiry if used
-- [ ] Cron inventory entry (host, schedule, log path) — mirror trading style
+- [x] Cron inventory entry (host, schedule, log path) — mirror trading style (`/etc/cron.d/karaoke-phase-b-maintenance` on pve + pvetos; log `/var/log/karaoke-cron.log`)
 - [ ] Alert or log on cron failure
 
 ---

@@ -15,6 +15,11 @@
 -- ============================================
 
 -- ============================================
+-- 0. EXTENSIONS (local Patroni)
+-- ============================================
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ============================================
 -- 1. CORE TABLES
 -- ============================================
 
@@ -262,6 +267,7 @@ CREATE TABLE IF NOT EXISTS kara_song_history (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE kara_song_history DISABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS idx_history_room_id ON kara_song_history(room_id);
 CREATE INDEX IF NOT EXISTS idx_history_user_id ON kara_song_history(user_id);
@@ -299,13 +305,7 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_favorite_song_ids
 
 ALTER TABLE kara_song_history ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Enable all for authenticated and anon users" ON kara_song_history;
-CREATE POLICY "Enable all for authenticated and anon users" 
-  ON kara_song_history 
-  FOR ALL 
-  TO authenticated, anon 
-  USING (true) 
-  WITH CHECK (true);
+-- Phase B: skip Supabase RLS policy on kara_song_history (no authenticated/anon roles)
 
 -- ============================================
 -- 6. POSTGRESQL FUNCTIONS
@@ -402,7 +402,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON FUNCTION advance_playback(UUID) TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION advance_playback(UUID) TO kara_app';
+  END IF;
+END $grant$;
 
 -- 6.2: host_reorder_queue (host reorders any queue item)
 CREATE OR REPLACE FUNCTION host_reorder_queue(
@@ -514,7 +519,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON FUNCTION host_reorder_queue(UUID, UUID, INTEGER) TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION host_reorder_queue(UUID, UUID, INTEGER) TO kara_app';
+  END IF;
+END $grant$;
 
 -- 6.3: user_reorder_queue (user reorders their own queue items)
 CREATE OR REPLACE FUNCTION user_reorder_queue(
@@ -624,7 +634,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON FUNCTION user_reorder_queue(UUID, UUID, VARCHAR) TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION user_reorder_queue(UUID, UUID, VARCHAR) TO kara_app';
+  END IF;
+END $grant$;
 
 -- 6.4: expire_old_rooms (v5.0: Phase 1 - Room expiry)
 CREATE OR REPLACE FUNCTION expire_old_rooms()
@@ -637,7 +652,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-GRANT EXECUTE ON FUNCTION expire_old_rooms() TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION expire_old_rooms() TO kara_app';
+  END IF;
+END $grant$;
 
 -- 6.5: set_primary_tv (v5.0: Host can reassign primary TV)
 CREATE OR REPLACE FUNCTION set_primary_tv(
@@ -684,7 +704,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION set_primary_tv(UUID, UUID, UUID) TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION set_primary_tv(UUID, UUID, UUID) TO kara_app';
+  END IF;
+END $grant$;
 
 COMMENT ON FUNCTION set_primary_tv IS 
   'Allows host to change primary_tv_id. Verifies host_id before updating. Adds TV to connected list if not present. Returns true on success, raises exception if not host.';
@@ -718,7 +743,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION add_connected_tv(UUID, UUID) TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION add_connected_tv(UUID, UUID) TO kara_app';
+  END IF;
+END $grant$;
 
 COMMENT ON FUNCTION add_connected_tv IS 
   'Adds a TV ID to the connected_tv_ids array when TV registers. Called by register-tv API.';
@@ -749,7 +779,12 @@ $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION cleanup_stale_participations IS 'Phase 2.1: Remove participations inactive >24 hours (safety net for users who forget to leave)';
 
-GRANT EXECUTE ON FUNCTION cleanup_stale_participations() TO authenticated, anon, service_role;
+-- Phase B: grant to kara_app (Supabase roles omitted)
+DO $grant$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'kara_app') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION cleanup_stale_participations() TO kara_app';
+  END IF;
+END $grant$;
 
 -- 6.8: kara_songs_set_base_fields (helper function for song metadata)
 -- Note: This function exists in production but implementation not shown in schema queries
