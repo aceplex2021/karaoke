@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { extractYouTubeId } from '@/lib/youtube';
 import { isAndroid } from '@/lib/utils';
 
@@ -26,6 +26,15 @@ enum YTPlayerState {
   BUFFERING = 3,
   CUED = 5,
 }
+
+export type YouTubePlayerHandle = {
+  seekTo: (seconds: number) => void;
+  play: () => void;
+  pause: () => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  getPlayerState: () => number | null;
+};
 
 interface YouTubePlayerProps {
   /**
@@ -90,7 +99,7 @@ interface YouTubePlayerProps {
   startAtSeconds?: number;
 }
 
-export function YouTubePlayer({
+export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>(function YouTubePlayer({
   videoUrl,
   onEnded,
   onError,
@@ -103,7 +112,7 @@ export function YouTubePlayer({
   controls = true,
   muted = false,
   startAtSeconds = 0,
-}: YouTubePlayerProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -112,6 +121,38 @@ export function YouTubePlayer({
   const startAtRef = useRef(startAtSeconds);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    seekTo: (seconds: number) => {
+      if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds, true);
+    },
+    play: () => {
+      playerRef.current?.playVideo?.();
+    },
+    pause: () => {
+      playerRef.current?.pauseVideo?.();
+    },
+    getCurrentTime: () => {
+      if (playerRef.current?.getCurrentTime) {
+        const t = playerRef.current.getCurrentTime();
+        return typeof t === 'number' && Number.isFinite(t) ? t : 0;
+      }
+      return 0;
+    },
+    getDuration: () => {
+      if (playerRef.current?.getDuration) {
+        const d = playerRef.current.getDuration();
+        return typeof d === 'number' && Number.isFinite(d) ? d : 0;
+      }
+      return 0;
+    },
+    getPlayerState: () => {
+      if (playerRef.current?.getPlayerState) {
+        return playerRef.current.getPlayerState();
+      }
+      return null;
+    },
+  }), []);
 
   // Keep latest time callback without restarting the YT progress interval
   useEffect(() => {
@@ -496,27 +537,7 @@ export function YouTubePlayer({
       onStateChange(state);
     }
 
-    // Secondary TVs (muted): YT often pauses after buffer — resume so progress/banner don't freeze
-    if (
-      state === YTPlayerState.PAUSED &&
-      mutedRef.current &&
-      autoPlay &&
-      playerRef.current &&
-      typeof playerRef.current.playVideo === 'function'
-    ) {
-      setTimeout(() => {
-        try {
-          if (mutedRef.current && playerRef.current?.playVideo) {
-            console.log('[YouTubePlayer] Secondary paused — forcing play');
-            playerRef.current.playVideo();
-          }
-        } catch (e) {
-          console.warn('[YouTubePlayer] force play failed', e);
-        }
-      }, 400);
-    }
-
-    // Handle ended
+    // Handle ended (primary advances; secondary is a follower and ignores onEnded upstream)
     if (state === YTPlayerState.ENDED) {
       console.log('[YouTubePlayer] Video ended');
       if (onEnded) {
@@ -613,7 +634,7 @@ export function YouTubePlayer({
       />
     </div>
   );
-}
+});
 
 /**
  * Hook to control YouTube player

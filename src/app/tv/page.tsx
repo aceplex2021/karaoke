@@ -8,7 +8,7 @@ import type { ReorderQueueRequest } from '@/shared/types';
 import { getQRCodeUrl } from '@/lib/utils';
 import QRCode from '@/components/QRCode';
 import type { Room, QueueItem } from '@/shared/types';
-import { YouTubePlayer } from '@/components/YouTubePlayer';
+import { YouTubePlayer, type YouTubePlayerHandle } from '@/components/YouTubePlayer';
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
 import { supabase } from '@/lib/supabase'; // v4.4: Realtime sync
@@ -57,6 +57,9 @@ function TVModePageContent() {
   const [useRealtime, setUseRealtime] = useState(true); // v4.4: Use Realtime (fallback to polling if false)
   
   const videoRef = useRef<HTMLVideoElement>(null);
+  const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
+  const syncChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const lastFollowerSeekAtRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
@@ -100,6 +103,133 @@ function TVModePageContent() {
       videoRef.current.muted = !isPrimaryTV;
     }
   }, [isPrimaryTV]);
+
+  type PlayheadPayload = {
+    entryId: string;
+    t: number;
+    paused: boolean;
+    wallMs: number;
+  };
+
+  const SYNC_INTERVAL_MS = 100;
+  const SYNC_DRIFT_SEC = 0.1; // 100ms target
+  const SEEK_COOLDOWN_MS = 120; // avoid seek thrash
+
+  const readLocalPlayhead = useCallback((): { t: number; paused: boolean } | null => {
+    const yt = youtubePlayerRef.current;
+    if (yt) {
+      const state = yt.getPlayerState();
+      return {
+        t: yt.getCurrentTime(),
+        paused: state === 2 || state === -1,
+      };
+    }
+    const video = videoRef.current;
+    if (video && video.src) {
+      return { t: video.currentTime || 0, paused: video.paused };
+    }
+    return null;
+  }, []);
+
+  const applyFollowerPlayhead = useCallback((payload: PlayheadPayload) => {
+    if (isPrimaryTVRef.current) return;
+    const currentId = currentSongRef.current?.id;
+    if (!currentId || payload.entryId !== currentId) return;
+    if (!Number.isFinite(payload.t) || payload.t < 0) return;
+
+    // Compensate small network delay (capped) so secondary leads slightly toward live primary
+    const ageSec = Math.min(Math.max((Date.now() - payload.wallMs) / 1000, 0), 0.25);
+    const target = payload.paused ? payload.t : payload.t + ageSec;
+
+    const local = readLocalPlayhead();
+    if (!local) return;
+
+    const drift = Math.abs(local.t - target);
+    const now = Date.now();
+    const canSeek =
+      drift > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS;
+
+    const yt = youtubePlayerRef.current;
+    const video = videoRef.current;
+
+    if (canSeek) {
+      lastFollowerSeekAtRef.current = now;
+      if (yt) {
+        yt.seekTo(target);
+      } else if (video) {
+        try {
+          video.currentTime = target;
+        } catch {
+          /* ignore seek errors */
+        }
+      }
+    }
+
+    // Match pause/play from primary (view-only follower)
+    if (yt) {
+      if (payload.paused) yt.pause();
+      else yt.play();
+    } else if (video) {
+      if (payload.paused) {
+        video.pause();
+      } else if (video.paused) {
+        video.play().catch(() => {});
+      }
+    }
+  }, [readLocalPlayhead]);
+
+  // Primary broadcasts playhead; secondary follows within ~100ms
+  useEffect(() => {
+    const roomId = room?.id;
+    if (!roomId) return;
+
+    if (syncChannelRef.current) {
+      supabase.removeChannel(syncChannelRef.current);
+      syncChannelRef.current = null;
+    }
+
+    const channel = supabase
+      .channel(`tv-sync-${roomId}`, {
+        config: { broadcast: { self: false } },
+      })
+      .on('broadcast', { event: 'playhead' }, ({ payload }) => {
+        applyFollowerPlayhead(payload as PlayheadPayload);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[tv] ✅ Playhead sync channel ready');
+        }
+      });
+
+    syncChannelRef.current = channel;
+
+    const tick = window.setInterval(() => {
+      if (!isPrimaryTVRef.current) return;
+      const entryId = currentSongRef.current?.id;
+      if (!entryId) return;
+      const local = readLocalPlayhead();
+      if (!local) return;
+
+      channel.send({
+        type: 'broadcast',
+        event: 'playhead',
+        payload: {
+          entryId,
+          t: local.t,
+          paused: local.paused,
+          wallMs: Date.now(),
+        } satisfies PlayheadPayload,
+      });
+    }, SYNC_INTERVAL_MS);
+
+    return () => {
+      clearInterval(tick);
+      if (syncChannelRef.current) {
+        supabase.removeChannel(syncChannelRef.current);
+        syncChannelRef.current = null;
+      }
+    };
+  }, [room?.id, applyFollowerPlayhead, readLocalPlayhead]);
 
   const elapsedFromStartedAt = (startedAt?: string | null): number => {
     if (!startedAt) return 0;
@@ -224,6 +354,10 @@ function TVModePageContent() {
         console.log('[tv] Cleaning up Realtime subscription');
         supabase.removeChannel(realtimeChannelRef.current);
         realtimeChannelRef.current = null;
+      }
+      if (syncChannelRef.current) {
+        supabase.removeChannel(syncChannelRef.current);
+        syncChannelRef.current = null;
       }
       // v4.8.0: Reset reconnect attempts
       reconnectAttemptsRef.current = 0;
@@ -1040,15 +1174,16 @@ function TVModePageContent() {
         {isYouTubeSong && currentSong?.youtube_url && (
           <YouTubePlayer
             key={currentSong.id}
+            ref={youtubePlayerRef}
             videoUrl={currentSong.youtube_url}
             onReady={() => {
               playingQueueItemIdRef.current = currentSong.id;
               console.log('[TV] YouTube player ready, tracking queue item:', currentSong.id);
             }}
-            onEnded={handleEnded}
+            onEnded={isPrimaryTV ? handleEnded : undefined}
             onError={(code) => {
               console.error('[TV] YouTube error:', code);
-              handlePlaybackError();
+              if (isPrimaryTVRef.current) handlePlaybackError();
             }}
             onStateChange={(state) => {
               ytPlayerStateRef.current = state;
@@ -1065,6 +1200,7 @@ function TVModePageContent() {
             }}
             autoPlay={true}
             muted={!isPrimaryTV}
+            controls={false}
             startAtSeconds={seekOffsetSeconds}
             width="100%"
             height="100%"
@@ -1079,12 +1215,14 @@ function TVModePageContent() {
             autoPlay
             playsInline
             muted={!isPrimaryTV}
-            onEnded={handleEnded}
+            controls={false}
+            onEnded={isPrimaryTV ? handleEnded : undefined}
             onTimeUpdate={handleTimeUpdate}
             style={{
               width: '100%',
               height: '100%',
               objectFit: 'contain',
+              pointerEvents: isPrimaryTV ? 'auto' : 'none',
             }}
           />
         )}
@@ -1283,8 +1421,8 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Controls Overlay - YouTube style (v3.5 only, hidden for v4.0 YouTube mode) */}
-      {showControls && currentSong && !needsUserInteraction && !isYouTubeSong && (
+      {/* Controls Overlay — primary only (secondary is view-only follower) */}
+      {isPrimaryTV && showControls && currentSong && !needsUserInteraction && !isYouTubeSong && (
         <div
           style={{
             position: 'absolute',
