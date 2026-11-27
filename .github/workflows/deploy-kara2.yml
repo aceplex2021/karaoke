@@ -56,6 +56,12 @@ jobs:
           fi
           chmod 644 cloudflared/credentials.json cloudflared/config.yml || true
 
-          docker compose up -d --build --remove-orphans
+          # Clear stale/conflicted web containers from interrupted recreates
+          # (Docker can leave "No such container: <old-id>" deps that break compose up)
+          docker compose stop web || true
+          docker rm -f $(docker ps -aq --filter name=kara2-web) 2>/dev/null || true
+          docker container prune -f >/dev/null 2>&1 || true
+
+          docker compose up -d --build --remove-orphans --force-recreate
           docker compose ps
           echo "Deployed $(git rev-parse --short HEAD) to kara2"
