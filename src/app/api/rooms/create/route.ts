@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
         host_id: user.id,
         queue_mode: selectedMode, // Add queue mode
         approval_mode: selectedApprovalMode, // v4.0: Add approval mode
+        is_active: true,
         expires_at: expiresAt.toISOString(), // Phase 1: Explicitly set expiry
       })
       .select()

@@ -36,6 +36,20 @@ function quoteIdent(id: string) {
   return `"${id}"`;
 }
 
+/** node-pg needs JSON/JSONB values as strings; leave Date/Buffer alone. */
+function encodeParam(val: unknown): unknown {
+  if (val === undefined) return null;
+  if (
+    val !== null &&
+    typeof val === 'object' &&
+    !(val instanceof Date) &&
+    !Buffer.isBuffer(val)
+  ) {
+    return JSON.stringify(val);
+  }
+  return val;
+}
+
 function parseSelect(selectStr: string): { columns: string[] | '*'; nests: NestSpec[] } {
   const raw = selectStr.trim();
   if (!raw || raw === '*') return { columns: '*', nests: [] };
@@ -379,7 +393,7 @@ class FilterBuilder {
           const placeholders: string[] = [];
           for (const k of keys) {
             placeholders.push(`$${p++}`);
-            allParams.push(row[k]);
+            allParams.push(encodeParam(row[k]));
           }
           valueGroups.push(`(${placeholders.join(',')})`);
         }
@@ -400,7 +414,7 @@ class FilterBuilder {
         const keys = Object.keys(row);
         let p = 1;
         const sets = keys.map((k) => `${quoteIdent(k)} = $${p++}`);
-        const params: unknown[] = keys.map((k) => row[k]);
+        const params: unknown[] = keys.map((k) => encodeParam(row[k]));
         const where = this.buildWhere(p);
         const sql = `UPDATE ${quoteIdent(this.table)} SET ${sets.join(',')}${where.sql} RETURNING *`;
         const result = await query(sql, [...params, ...where.params]);
