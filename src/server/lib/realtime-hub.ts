@@ -14,6 +14,9 @@ const playheadBus = new EventEmitter();
 roomBus.setMaxListeners(200);
 playheadBus.setMaxListeners(200);
 
+/** Latest playhead per room — SSE fanout + GET poll backup */
+const lastPlayheadByRoom = new Map<string, Record<string, unknown>>();
+
 let listenStarted = false;
 
 export function publishRoom(roomId: string, event: string = 'change') {
@@ -27,7 +30,12 @@ export function subscribeRoom(roomId: string, fn: RoomListener) {
 }
 
 export function publishPlayhead(roomId: string, payload: Record<string, unknown>) {
+  lastPlayheadByRoom.set(roomId, payload);
   playheadBus.emit(`playhead:${roomId}`, payload);
+}
+
+export function getLastPlayhead(roomId: string): Record<string, unknown> | null {
+  return lastPlayheadByRoom.get(roomId) || null;
 }
 
 export function subscribePlayhead(roomId: string, fn: PlayheadListener) {

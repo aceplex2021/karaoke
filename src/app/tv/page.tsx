@@ -11,7 +11,7 @@ import type { Room, QueueItem } from '@/shared/types';
 import { YouTubePlayer, type YouTubePlayerHandle } from '@/components/YouTubePlayer';
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
-import { connectRoomRealtime, postPlayhead } from '@/lib/realtime-client';
+import { connectRoomRealtime, fetchLastPlayhead, postPlayhead } from '@/lib/realtime-client';
 import { isConstrainedTvBrowser } from '@/lib/utils';
 
 /**
@@ -60,6 +60,14 @@ function TVModePageContent() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const lastFollowerSeekAtRef = useRef(0);
+  const lastPlayheadRef = useRef<{
+    entryId: string;
+    t: number;
+    paused: boolean;
+    wallMs: number;
+  } | null>(null);
+  const lastPlayheadAtRef = useRef(0);
+  const playheadLoggedRef = useRef(false);
   const sseUnsubRef = useRef<(() => void) | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
@@ -145,23 +153,34 @@ function TVModePageContent() {
 
   const applyFollowerPlayhead = useCallback((payload: PlayheadPayload) => {
     if (isPrimaryTVRef.current) return;
+    if (!payload.entryId || !Number.isFinite(payload.t) || payload.t < 0) return;
+
+    lastPlayheadRef.current = payload;
+    lastPlayheadAtRef.current = Date.now();
+    if (!playheadLoggedRef.current) {
+      playheadLoggedRef.current = true;
+      console.log('[tv] Secondary received playhead', {
+        t: payload.t.toFixed(1),
+        entryId: payload.entryId,
+      });
+    }
+
     const currentId = currentSongRef.current?.id;
     if (!currentId || payload.entryId !== currentId) return;
-    if (!Number.isFinite(payload.t) || payload.t < 0) return;
 
-    // Follow primary exactly — do NOT add ageSec (that made secondaries lead).
+    // Follow primary time exactly (no ageSec — that made secondaries lead).
     const target = payload.t;
-
     const local = readLocalPlayhead();
-    if (!local) return;
-
-    const drift = Math.abs(local.t - target);
+    const localT = local?.t ?? 0;
+    const drift = Math.abs(localT - target);
     const now = Date.now();
     const canSeek =
       drift > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS;
 
     const yt = youtubePlayerRef.current;
     const video = videoRef.current;
+    // Player may not be ready yet — keep lastPlayhead and retry on next tick/poll
+    if (!yt && !(video && video.src)) return;
 
     if (canSeek) {
       lastFollowerSeekAtRef.current = now;
@@ -176,7 +195,6 @@ function TVModePageContent() {
       }
     }
 
-    // Match pause/play from primary (view-only follower)
     if (yt) {
       if (payload.paused) yt.pause();
       else yt.play();
@@ -189,36 +207,63 @@ function TVModePageContent() {
     }
   }, [readLocalPlayhead]);
 
-  // Primary posts playhead to server SSE hub; secondary applies follower sync
-  useEffect(() => {
-    const roomId = room?.id;
-    if (!roomId) return;
-
-    const tick = window.setInterval(() => {
-      if (!isPrimaryTVRef.current) return;
-      // Always post when primary — connected_tv_ids JSONB often isn't a JS array,
-      // so gating on length silenced playhead and secondary free-ran ahead.
-      const entryId = currentSongRef.current?.id;
-      if (!entryId) return;
-      const local = readLocalPlayhead();
-      if (!local) return;
-      postPlayhead({
-        roomId,
-        entryId,
-        t: local.t,
-        paused: local.paused,
-        wallMs: Date.now(),
-      });
-    }, SYNC_INTERVAL_MS);
-
-    return () => clearInterval(tick);
-  }, [room?.id, readLocalPlayhead]);
-
   const elapsedFromStartedAt = (startedAt?: string | null): number => {
     if (!startedAt) return 0;
     const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
     return Number.isFinite(elapsed) && elapsed > 2 ? elapsed : 0;
   };
+
+  // Primary posts playhead; secondary polls GET backup (SSE playhead often dropped by proxies)
+  useEffect(() => {
+    const roomId = room?.id;
+    if (!roomId) return;
+
+    const tick = window.setInterval(() => {
+      if (isPrimaryTVRef.current) {
+        const entryId = currentSongRef.current?.id;
+        if (!entryId) return;
+        const local = readLocalPlayhead();
+        if (!local) return;
+        postPlayhead({
+          roomId,
+          entryId,
+          t: local.t,
+          paused: local.paused,
+          wallMs: Date.now(),
+        });
+        return;
+      }
+
+      fetchLastPlayhead(roomId).then((p) => {
+        if (isPrimaryTVRef.current) return;
+        if (p?.entryId && typeof p.t === 'number') {
+          applyFollowerPlayhead({
+            entryId: p.entryId,
+            t: p.t,
+            paused: p.paused,
+            wallMs: p.wallMs,
+          });
+          return;
+        }
+        // No hub playhead yet — nudge toward wall elapsed (bootstrap only)
+        const staleMs = Date.now() - lastPlayheadAtRef.current;
+        if (staleMs < 2000 && lastPlayheadAtRef.current > 0) return;
+        const entryId = currentSongRef.current?.id;
+        const wallT = elapsedFromStartedAt(roomRef.current?.current_song_started_at);
+        if (!entryId || wallT <= 2) return;
+        const local = readLocalPlayhead();
+        if (local && Math.abs(local.t - wallT) < 1.5) return;
+        applyFollowerPlayhead({
+          entryId,
+          t: wallT,
+          paused: false,
+          wallMs: Date.now(),
+        });
+      });
+    }, Math.max(SYNC_INTERVAL_MS, 250));
+
+    return () => clearInterval(tick);
+  }, [room?.id, readLocalPlayhead, applyFollowerPlayhead]);
 
   const getTvAdvanceOpts = () => {
     const id = tvId || (typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null);
@@ -496,17 +541,14 @@ function TVModePageContent() {
             }
             setQueue(state.queue);
             setUpNext(state.upNext);
-            // Only retarget seek on real song change; never on secondary reconnect refresh
+            // Retarget seek only on real song change (bootstrap; playhead fine-tunes secondary)
             if (nextEntryId !== prevEntryId) {
-              if (isPrimaryTVRef.current) {
-                const offset = elapsedFromStartedAt(state.room.current_song_started_at);
-                setSeekOffsetSeconds(offset);
-                seekOffsetRef.current = offset;
-              } else {
-                // Secondary: playhead is source of truth (wall clock made secondary lead)
-                setSeekOffsetSeconds(0);
-                seekOffsetRef.current = 0;
-              }
+              const offset = elapsedFromStartedAt(state.room.current_song_started_at);
+              setSeekOffsetSeconds(offset);
+              seekOffsetRef.current = offset;
+              playheadLoggedRef.current = false;
+              lastPlayheadRef.current = null;
+              lastPlayheadAtRef.current = 0;
             }
           }
         } catch (err: any) {
@@ -668,21 +710,41 @@ function TVModePageContent() {
         }
       }
       
-      // Mid-song: primary may use wall start; secondary waits for playhead (avoids leading)
+      // Mid-song bootstrap: both use wall clock so secondary never starts at 0.
+      // Playhead (SSE + poll) then fine-tunes secondary to primary.
       const initialState = await api.getRoomState(roomId);
-      if (isPrimary) {
-        const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
-        setSeekOffsetSeconds(offset);
-        seekOffsetRef.current = offset;
-        if (offset > 2) {
-          console.log('[tv] Mid-song primary join — seek to', offset.toFixed(1), 's');
-        } else if (initialState.currentSong) {
-          console.log('[tv] ✅ Primary TV - playing current song immediately');
+      const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
+      setSeekOffsetSeconds(offset);
+      seekOffsetRef.current = offset;
+      playheadLoggedRef.current = false;
+      lastPlayheadRef.current = null;
+      lastPlayheadAtRef.current = 0;
+      if (offset > 2) {
+        console.log(
+          '[tv] Mid-song join — bootstrap seek',
+          offset.toFixed(1),
+          's (primary=',
+          isPrimary,
+          ')'
+        );
+      } else if (isPrimary && initialState.currentSong) {
+        console.log('[tv] ✅ Primary TV - playing current song immediately');
+      }
+      // Try immediate playhead catch-up (primary may already be posting)
+      if (!isPrimary) {
+        const p = await fetchLastPlayhead(roomId);
+        if (p?.entryId && typeof p.t === 'number' && p.t > 2) {
+          setSeekOffsetSeconds(p.t);
+          seekOffsetRef.current = p.t;
+          lastPlayheadRef.current = {
+            entryId: p.entryId,
+            t: p.t,
+            paused: p.paused,
+            wallMs: p.wallMs,
+          };
+          lastPlayheadAtRef.current = Date.now();
+          console.log('[tv] Secondary bootstrap from hub playhead', p.t.toFixed(1), 's');
         }
-      } else {
-        setSeekOffsetSeconds(0);
-        seekOffsetRef.current = 0;
-        console.log('[tv] Secondary — waiting for primary playhead (no wall seek)');
       }
       setJoinedMidSong(false);
       initialEntryIdRef.current = null;
