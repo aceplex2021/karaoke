@@ -56,6 +56,34 @@ export async function POST(request: NextRequest) {
       title,
     });
 
+    // Block duplicate YouTube video already pending/playing in this room
+    const { data: activeYt } = await supabaseAdmin
+      .from('kara_queue')
+      .select('id, status, youtube_url, metadata')
+      .eq('room_id', room_id)
+      .eq('source_type', 'youtube')
+      .in('status', ['pending', 'playing']);
+
+    const dup = (activeYt || []).find((row: any) => {
+      const metaId =
+        row?.metadata && typeof row.metadata === 'object'
+          ? row.metadata.videoId
+          : null;
+      if (metaId && metaId === videoId) return true;
+      if (row?.youtube_url) {
+        const existingId = extractYouTubeId(row.youtube_url);
+        return existingId === videoId;
+      }
+      return false;
+    });
+
+    if (dup) {
+      return NextResponse.json(
+        { error: 'Already in queue', queueItemId: dup.id, status: dup.status },
+        { status: 409 }
+      );
+    }
+
     // Fetch video title from YouTube if not provided
     let videoTitle = title || 'YouTube Video';
     if (!title || title.trim() === '') {

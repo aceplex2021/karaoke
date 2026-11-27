@@ -59,6 +59,23 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    // Block duplicate catalog song already pending/playing in this room
+    const { data: existingCatalog } = await supabaseAdmin
+      .from('kara_queue')
+      .select('id, status')
+      .eq('room_id', room_id)
+      .eq('version_id', finalVersionId)
+      .in('status', ['pending', 'playing'])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingCatalog) {
+      return NextResponse.json(
+        { error: 'Already in queue', queueItemId: existingCatalog.id, status: existingCatalog.status },
+        { status: 409 }
+      );
+    }
     
     // 1. Get room's queue_mode and current_entry_id
     const { data: room, error: roomError } = await supabaseAdmin

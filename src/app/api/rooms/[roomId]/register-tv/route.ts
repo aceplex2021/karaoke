@@ -36,6 +36,12 @@ export async function POST(
       return NextResponse.json({ error: 'Room not found' }, { status: 404 });
     }
 
+    const connectedBefore = Array.isArray(room.connected_tv_ids)
+      ? room.connected_tv_ids
+      : [];
+    const alreadyConnected = connectedBefore.includes(tv_id);
+    const primaryBefore = room.primary_tv_id;
+
     const { error: addTvError } = await supabaseAdmin.rpc('add_connected_tv', {
       p_room_id: roomId,
       p_tv_id: tv_id,
@@ -43,9 +49,8 @@ export async function POST(
     if (addTvError) {
       // Fallback without RPC: append in app
       console.warn('[API] add_connected_tv RPC failed, using fallback:', addTvError.message);
-      const list = Array.isArray(room.connected_tv_ids) ? [...room.connected_tv_ids] : [];
-      if (!list.includes(tv_id)) {
-        list.push(tv_id);
+      if (!alreadyConnected) {
+        const list = [...connectedBefore, tv_id];
         await supabaseAdmin
           .from('kara_rooms')
           .update({ connected_tv_ids: list })
@@ -54,6 +59,7 @@ export async function POST(
     }
 
     let isPrimary = false;
+    let primaryChanged = false;
 
     if (room.primary_tv_id === tv_id) {
       isPrimary = true;
@@ -77,6 +83,7 @@ export async function POST(
 
       if (claimed?.primary_tv_id === tv_id) {
         isPrimary = true;
+        primaryChanged = true;
         console.log('[API] TV', tv_id, 'registered as PRIMARY (atomic)');
       } else {
         const { data: refreshed } = await supabaseAdmin
@@ -85,6 +92,7 @@ export async function POST(
           .eq('id', roomId)
           .single();
         isPrimary = refreshed?.primary_tv_id === tv_id;
+        primaryChanged = refreshed?.primary_tv_id !== primaryBefore;
         console.log(
           '[API] TV',
           tv_id,
@@ -96,12 +104,19 @@ export async function POST(
       console.log('[API] TV', tv_id, 'registered as SECONDARY');
     }
 
-    await notifyRoom(roomId, 'tv_register');
+    // Quiet reconnect: already-listed secondary refresh must not wake primary refreshState
+    const shouldNotify = !alreadyConnected || primaryChanged;
+    if (shouldNotify) {
+      await notifyRoom(roomId, 'tv_register');
+    } else {
+      console.log('[API] Quiet TV re-register (no notify):', tv_id);
+    }
 
     return NextResponse.json({
       success: true,
       is_primary: isPrimary,
       tv_id,
+      notified: shouldNotify,
     });
   } catch (error: any) {
     console.error('[API] Error in register-tv:', error);

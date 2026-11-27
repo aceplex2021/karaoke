@@ -191,9 +191,10 @@ export const api = {
     });
     console.log('[api] addToQueue response status:', res.status);
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error('[api] addToQueue error:', errorText);
-      throw new Error(`Failed to add to queue: ${errorText}`);
+      const errorData = await res.json().catch(() => null);
+      const msg = errorData?.error || 'Failed to add to queue';
+      console.error('[api] addToQueue error:', errorData || msg);
+      throw new Error(typeof msg === 'string' ? msg : 'Failed to add to queue');
     }
     const result = await res.json();
     console.log('[api] addToQueue success:', result);
@@ -214,9 +215,10 @@ export const api = {
     });
     console.log('[api] addYouTubeToQueue response status:', res.status);
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error('[api] addYouTubeToQueue error:', errorText);
-      throw new Error(`Failed to add YouTube video: ${errorText}`);
+      const errorData = await res.json().catch(() => null);
+      const msg = errorData?.error || 'Failed to add YouTube video';
+      console.error('[api] addYouTubeToQueue error:', errorData || msg);
+      throw new Error(typeof msg === 'string' ? msg : 'Failed to add YouTube video');
     }
     const result = await res.json();
     console.log('[api] addYouTubeToQueue success:', result);

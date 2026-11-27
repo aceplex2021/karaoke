@@ -478,16 +478,35 @@ function TVModePageContent() {
 
           if (requestId === requestIdRef.current) {
             const prevEntryId = roomRef.current?.current_entry_id;
+            const nextEntryId = state.room.current_entry_id;
+            const sameSong =
+              prevEntryId != null &&
+              nextEntryId != null &&
+              prevEntryId === nextEntryId &&
+              currentSongRef.current?.id === state.currentSong?.id;
+
             setRoom(state.room);
             roomRef.current = state.room;
-            setCurrentSong(state.currentSong);
-            currentSongRef.current = state.currentSong;
+            // Keep player object stable when same entry — avoids hitch/restart on soft refreshes
+            if (!sameSong) {
+              setCurrentSong(state.currentSong);
+              currentSongRef.current = state.currentSong;
+            } else if (state.currentSong) {
+              currentSongRef.current = state.currentSong;
+            }
             setQueue(state.queue);
             setUpNext(state.upNext);
-            if (state.room.current_entry_id !== prevEntryId) {
-              const offset = elapsedFromStartedAt(state.room.current_song_started_at);
-              setSeekOffsetSeconds(offset);
-              seekOffsetRef.current = offset;
+            // Only retarget seek on real song change; never on secondary reconnect refresh
+            if (nextEntryId !== prevEntryId) {
+              if (isPrimaryTVRef.current) {
+                const offset = elapsedFromStartedAt(state.room.current_song_started_at);
+                setSeekOffsetSeconds(offset);
+                seekOffsetRef.current = offset;
+              } else {
+                // Secondary: playhead is source of truth (wall clock made secondary lead)
+                setSeekOffsetSeconds(0);
+                seekOffsetRef.current = 0;
+              }
             }
           }
         } catch (err: any) {
@@ -557,7 +576,13 @@ function TVModePageContent() {
           pollingIntervalRef.current = null;
         }
       },
-      onRoom: () => {
+      onRoom: (payload) => {
+        // Soft presence: never let another TV's register hitch primary playback
+        const soft =
+          payload?.event === 'tv_register' || payload?.event === 'tv_presence';
+        if (soft && isPrimaryTVRef.current) {
+          return;
+        }
         // Debounce NOTIFY storms — longer on Smart TVs to avoid main-thread jank
         const debounceMs = isConstrainedTvBrowser() ? 900 : 500;
         if (sseRefreshTimerRef.current) clearTimeout(sseRefreshTimerRef.current);
@@ -643,18 +668,24 @@ function TVModePageContent() {
         }
       }
       
-      // Phase A: mid-song join seeks via current_song_started_at (no full-song freeze)
+      // Mid-song: primary may use wall start; secondary waits for playhead (avoids leading)
       const initialState = await api.getRoomState(roomId);
-      const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
-      setSeekOffsetSeconds(offset);
-      seekOffsetRef.current = offset;
+      if (isPrimary) {
+        const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
+        setSeekOffsetSeconds(offset);
+        seekOffsetRef.current = offset;
+        if (offset > 2) {
+          console.log('[tv] Mid-song primary join — seek to', offset.toFixed(1), 's');
+        } else if (initialState.currentSong) {
+          console.log('[tv] ✅ Primary TV - playing current song immediately');
+        }
+      } else {
+        setSeekOffsetSeconds(0);
+        seekOffsetRef.current = 0;
+        console.log('[tv] Secondary — waiting for primary playhead (no wall seek)');
+      }
       setJoinedMidSong(false);
       initialEntryIdRef.current = null;
-      if (offset > 2) {
-        console.log('[tv] Mid-song join — will seek to', offset.toFixed(1), 's (primary=', isPrimary, ')');
-      } else if (isPrimary && initialState.currentSong) {
-        console.log('[tv] ✅ Primary TV - playing current song immediately');
-      }
       
       // v4.4: Use Realtime subscription with polling fallback
       // v4.8.0: Reset reconnect attempts on room load
