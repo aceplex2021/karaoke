@@ -34,26 +34,29 @@ Display/state orders by `sort_key`; reorder RPCs mutate `position`; adds often l
 
 ---
 
-## Issue A1: UP NEXT flying banner intermittent
+## Issue A1: UP NEXT flying banner intermittent / stuck
 
 ### Current Behavior
 Green banner sometimes missing or looks stuck mid-scroll (esp. YouTube).
 
 ### Expected
-Last ~90s of current song with a queued next: marquee scrolls reliably.
+Last ~90s of current song with a queued next: marquee scrolls reliably; dismisses near end.
 
 ### Root Cause
-Banner gated on YT `getCurrentTime`/`getDuration` which can be 0/stale; missing `upNext` also hides it. CSS/hysteresis alone insufficient.
+1. Banner gated on YT `getCurrentTime`/`getDuration` which can be 0/stale; missing `upNext` also hides it.
+2. **Confirmed in prod logs:** YT enters PAUSED (state 2) → `timeRemaining` freezes (e.g. 34.5s) → banner stays "on" and looks stuck. YouTube metadata has no duration, so metadata fallback alone is insufficient.
 
 ### Fix
-- Drive progress from YouTubePlayer interval with refs; fall back to known duration from queue metadata when player duration missing.
-- Keep hysteresis + marquee remount key.
-- Log gate failures when near end.
+- Drive banner window from **wall clock** (`current_song_started_at` / `started_at`) blended with player time so pause/buffer does not freeze remaining.
+- 1s ticker independent of YT progress callbacks.
+- Secondary (muted) auto-resume if YT pauses unexpectedly.
+- Keep hysteresis + marquee remount key; log "banner on" once per song.
 
 ### Test Plan
 - YouTube song, 2+ in queue, last 90s → banner scrolls.
+- Pause/buffer mid last-90s → banner still advances/dismisses (does not freeze).
 - Local HTML5 path still works.
-- No stuck mid-screen when song ends.
+- Secondary TV does not stay paused forever.
 
 ---
 

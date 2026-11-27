@@ -242,60 +242,101 @@ function TVModePageContent() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
+  const playerTimeRef = useRef(0);
+  const playerDurationRef = useRef(0);
+  const ytPlayerStateRef = useRef<number | null>(null);
+  const bannerLoggedSongRef = useRef<string | null>(null);
+
   // Reset progress when the playing queue item changes (YouTube remounts don't clear parent state)
   useEffect(() => {
     setCurrentTime(0);
     setDuration(0);
     setShowUpNextBanner(false);
+    playerTimeRef.current = 0;
+    playerDurationRef.current = 0;
+    ytPlayerStateRef.current = null;
+    bannerLoggedSongRef.current = null;
   }, [currentSong?.id]);
 
-  // Up Next banner: last 90s when there is a queued next singer.
-  // Fall back to queue/song metadata duration when YouTube reports 0.
+  useEffect(() => {
+    playerTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  useEffect(() => {
+    if (duration > 0) playerDurationRef.current = duration;
+  }, [duration]);
+
+  // Up Next banner: last 90s. Wall-clock blended with player time so YT pause/buffer
+  // cannot freeze remaining (prod logs: timeRemaining stuck at ~34s while state=PAUSED).
   useEffect(() => {
     if (!upNext || !currentSong) {
       setShowUpNextBanner(false);
       return;
     }
 
-    const metaDuration =
-      (typeof currentSong.duration === 'number' && currentSong.duration > 0
-        ? currentSong.duration
-        : null) ||
-      (typeof currentSong.song?.duration === 'number' && currentSong.song.duration > 0
-        ? currentSong.song.duration
-        : null) ||
-      0;
-    const effectiveDuration = duration > 0 ? duration : metaDuration;
+    const evaluate = () => {
+      const metaDuration =
+        (typeof currentSong.duration === 'number' && currentSong.duration > 0
+          ? currentSong.duration
+          : null) ||
+        (typeof currentSong.song?.duration === 'number' && currentSong.song.duration > 0
+          ? currentSong.song.duration
+          : null) ||
+        0;
+      const effectiveDuration =
+        playerDurationRef.current > 0 ? playerDurationRef.current : metaDuration;
 
-    if (!Number.isFinite(effectiveDuration) || !Number.isFinite(currentTime) || effectiveDuration <= 0) {
-      if (currentTime > 30) {
-        console.log('[tv] Up Next banner gated — no duration', {
-          playerDuration: duration,
-          metaDuration,
-          currentTime,
-          upNext: upNext.title,
-        });
+      if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
+        setShowUpNextBanner(false);
+        return;
       }
-      setShowUpNextBanner(false);
-      return;
-    }
 
-    const timeRemaining = effectiveDuration - currentTime;
-    setShowUpNextBanner((visible) => {
-      if (timeRemaining <= 0.5) return false;
-      if (!visible && timeRemaining <= 90) {
-        console.log('[tv] Up Next banner on', {
-          title: upNext.title,
-          singer: upNext.user_name,
-          timeRemaining,
-          effectiveDuration,
-        });
-        return true;
+      const startedAt =
+        roomRef.current?.current_song_started_at || currentSong.started_at || null;
+      let wallElapsed = 0;
+      if (startedAt) {
+        wallElapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
+        if (!Number.isFinite(wallElapsed) || wallElapsed < 0) wallElapsed = 0;
       }
-      if (visible && timeRemaining <= 95) return true;
-      return false;
-    });
-  }, [currentTime, duration, upNext, currentSong]);
+
+      const playerTime = playerTimeRef.current;
+      const ytState = ytPlayerStateRef.current;
+      // -1 unstarted, 2 paused, 3 buffering — player clock often stalls
+      const playerStalled = ytState === -1 || ytState === 2 || ytState === 3;
+
+      let effectiveTime = playerTime;
+      if (wallElapsed > 0 && (playerStalled || wallElapsed > playerTime + 1.5)) {
+        effectiveTime = Math.max(playerTime, wallElapsed);
+      }
+      effectiveTime = Math.min(Math.max(0, effectiveTime), effectiveDuration);
+
+      const timeRemaining = effectiveDuration - effectiveTime;
+      setShowUpNextBanner((visible) => {
+        if (timeRemaining <= 0.5) return false;
+        if (!visible && timeRemaining <= 90) {
+          if (bannerLoggedSongRef.current !== currentSong.id) {
+            bannerLoggedSongRef.current = currentSong.id;
+            console.log('[tv] Up Next banner on', {
+              title: upNext.title,
+              singer: upNext.user_name,
+              timeRemaining,
+              effectiveDuration,
+              playerTime,
+              wallElapsed,
+              ytState,
+            });
+          }
+          return true;
+        }
+        if (visible && timeRemaining <= 95) return true;
+        return false;
+      });
+    };
+
+    evaluate();
+    const id = setInterval(evaluate, 1000);
+    return () => clearInterval(id);
+  }, [upNext, currentSong]);
 
   // v4.6.0: Sidebar removed - QR code now always visible
 
@@ -1009,9 +1050,18 @@ function TVModePageContent() {
               console.error('[TV] YouTube error:', code);
               handlePlaybackError();
             }}
+            onStateChange={(state) => {
+              ytPlayerStateRef.current = state;
+            }}
             onTimeUpdate={(current, dur) => {
-              if (Number.isFinite(current)) setCurrentTime(current);
-              if (Number.isFinite(dur) && dur > 0) setDuration(dur);
+              if (Number.isFinite(current)) {
+                setCurrentTime(current);
+                playerTimeRef.current = current;
+              }
+              if (Number.isFinite(dur) && dur > 0) {
+                setDuration(dur);
+                playerDurationRef.current = dur;
+              }
             }}
             autoPlay={true}
             muted={!isPrimaryTV}

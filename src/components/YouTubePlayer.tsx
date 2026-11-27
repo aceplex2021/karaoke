@@ -496,6 +496,26 @@ export function YouTubePlayer({
       onStateChange(state);
     }
 
+    // Secondary TVs (muted): YT often pauses after buffer — resume so progress/banner don't freeze
+    if (
+      state === YTPlayerState.PAUSED &&
+      mutedRef.current &&
+      autoPlay &&
+      playerRef.current &&
+      typeof playerRef.current.playVideo === 'function'
+    ) {
+      setTimeout(() => {
+        try {
+          if (mutedRef.current && playerRef.current?.playVideo) {
+            console.log('[YouTubePlayer] Secondary paused — forcing play');
+            playerRef.current.playVideo();
+          }
+        } catch (e) {
+          console.warn('[YouTubePlayer] force play failed', e);
+        }
+      }, 400);
+    }
+
     // Handle ended
     if (state === YTPlayerState.ENDED) {
       console.log('[YouTubePlayer] Video ended');
