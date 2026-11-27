@@ -263,7 +263,8 @@ select {
   }
 }
 
-/* TV Up Next flying banner (global CSS — must not use styled-jsx hashed keyframes) */
+/* TV Up Next flying banner (global CSS — must not use styled-jsx hashed keyframes)
+   Start at right edge of viewport; end fully past left using element width (-100%). */
 @keyframes kara-scroll-left {
   from {
     transform: translateX(100vw);
@@ -276,13 +277,16 @@ select {
 .kara-upnext-track {
   overflow: hidden;
   width: 100%;
+  height: 4.5rem;
+  pointer-events: none;
 }
 
 .kara-upnext-marquee {
   display: inline-block;
   white-space: nowrap;
-  will-change: transform;
-  animation: kara-scroll-left 14s linear infinite;
+  animation: kara-scroll-left 12s linear infinite;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .kara-upnext-pill {

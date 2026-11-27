@@ -220,8 +220,8 @@ function TVModePageContent() {
     setShowUpNextBanner(false);
   }, [currentSong?.id]);
 
-  // Up Next banner: last 90s when there is a queued next singer
-  // Do not gate on needsUserInteraction (YouTube path never clears it the same way as HTML5)
+  // Up Next banner: last 90s when there is a queued next singer.
+  // Hysteresis avoids YouTube time jitter toggling the banner on/off (looks "stuck").
   useEffect(() => {
     if (!upNext || !currentSong) {
       setShowUpNextBanner(false);
@@ -233,16 +233,20 @@ function TVModePageContent() {
     }
 
     const timeRemaining = duration - currentTime;
-    const shouldShow = timeRemaining > 0.5 && timeRemaining <= 90;
-    setShowUpNextBanner(shouldShow);
-
-    if (shouldShow && timeRemaining > 89 && timeRemaining <= 90.5) {
-      console.log('[tv] Up Next banner on — remaining ~90s', {
-        title: upNext.title,
-        singer: upNext.user_name,
-        timeRemaining,
-      });
-    }
+    setShowUpNextBanner((visible) => {
+      if (timeRemaining <= 0.5) return false;
+      if (!visible && timeRemaining <= 90) {
+        console.log('[tv] Up Next banner on', {
+          title: upNext.title,
+          singer: upNext.user_name,
+          timeRemaining,
+        });
+        return true;
+      }
+      // Stay visible until near end once entered the window (no flicker at ~90s boundary)
+      if (visible && timeRemaining <= 95) return true;
+      return false;
+    });
   }, [currentTime, duration, upNext, currentSong]);
 
   // v4.6.0: Sidebar removed - QR code now always visible
@@ -1165,7 +1169,7 @@ function TVModePageContent() {
         </div>
       )}
 
-      {/* Up Next Flying Banner — above YouTube iframe (high z-index) */}
+      {/* Up Next Flying Banner — key remounts marquee so CSS animation never stalls mid-flight */}
       {showUpNextBanner && upNext && (
         <div
           className="kara-upnext-track"
@@ -1178,7 +1182,7 @@ function TVModePageContent() {
             pointerEvents: 'none',
           }}
         >
-          <div className="kara-upnext-marquee">
+          <div key={`upnext-${upNext.id}`} className="kara-upnext-marquee">
             <div className="kara-upnext-pill">
               <span style={{ fontSize: '2rem' }}>🎵</span>
               <span style={{ textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 900 }}>UP NEXT:</span>
@@ -1453,30 +1457,29 @@ function TVModePageContent() {
       )}
       </div>
 
-      {/* QR Code - upper-middle right (halfway between top and vertical center) */}
+      {/* QR Code - upper left, under Primary/Secondary badge; ~25% smaller */}
       {room && (
         <div
           style={{
             position: 'absolute',
-            top: '25%',
-            right: '1rem',
-            transform: 'translateY(-50%)',
+            top: appConfig.commercialMode ? '3.75rem' : '1rem',
+            left: '1rem',
             zIndex: 600,
             background: 'rgba(255,255,255,0.95)',
-            padding: '0.5rem',
+            padding: '0.35rem',
             borderRadius: '8px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: '0.25rem',
+            gap: '0.15rem',
             boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
           }}
         >
-          <div style={{ fontSize: '0.9rem', fontWeight: 'bold', textAlign: 'center', color: '#333', letterSpacing: '0.1em' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 'bold', textAlign: 'center', color: '#333', letterSpacing: '0.08em' }}>
             {room.room_code}
           </div>
-          <div style={{ padding: '0.25rem', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'white', borderRadius: '4px' }}>
-            <QRCode url={getQRCodeUrl(room.room_code)} size={80} />
+          <div style={{ padding: '0.15rem', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'white', borderRadius: '4px' }}>
+            <QRCode url={getQRCodeUrl(room.room_code)} size={60} />
           </div>
         </div>
       )}
