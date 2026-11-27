@@ -565,7 +565,8 @@ function TVModePageContent() {
             setUpNext(state.upNext);
             // Retarget seek only on real song change (bootstrap; playhead fine-tunes secondary)
             if (nextEntryId !== prevEntryId) {
-              const offset = elapsedFromStartedAt(state.room.current_song_started_at);
+              let offset = elapsedFromStartedAt(state.room.current_song_started_at);
+              if (offset > WALL_BOOTSTRAP_MAX_SEC) offset = 0;
               setSeekOffsetSeconds(offset);
               seekOffsetRef.current = offset;
               playheadLoggedRef.current = false;
