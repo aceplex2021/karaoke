@@ -39,7 +39,16 @@ export const api = {
   },
 
   async getRoomByCode(code: string): Promise<{ room: Room }> {
-    const res = await fetch(`${API_BASE}/rooms/code/${code}`);
+    const res = await fetch(
+      `${API_BASE}/rooms/code/${encodeURIComponent(code)}?t=${Date.now()}`,
+      {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      }
+    );
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: 'Room not found' }));
       const error = new Error(errorData.error || 'Room not found');
@@ -83,6 +92,7 @@ export const api = {
   async joinRoom(data: JoinRoomRequest): Promise<{ room: Room; user: User }> {
     const res = await fetch(`${API_BASE}/rooms/join`, {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });

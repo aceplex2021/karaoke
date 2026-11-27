@@ -97,7 +97,18 @@ function V4LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
 
           <button
             className="btn btn-secondary"
-            onClick={() => router.push('/join')}
+            onClick={() => {
+              // PWA keeps host/room keys across launches; clear so Join doesn't
+              // auto-open a stale/wrong code (shows up as "Room expired").
+              try {
+                localStorage.removeItem('current_room_code');
+                localStorage.removeItem('current_room_id');
+                localStorage.removeItem('user_role');
+              } catch {
+                /* ignore */
+              }
+              router.push('/join');
+            }}
             style={{ 
               width: '100%',
               padding: '1.5rem',

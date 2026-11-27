@@ -78,13 +78,19 @@ export default function JoinRoomPage() {
       return;
     }
 
+    const code = roomCode.trim().toUpperCase();
+
     // Store name in localStorage (Fix: Use correct key to match room page)
     if (typeof window !== 'undefined') {
       localStorage.setItem('user_display_name', userName);
+      // Joining a (possibly new) room as user — drop host/stale room keys
+      localStorage.setItem('user_role', 'user');
+      localStorage.removeItem('current_room_id');
+      localStorage.setItem('current_room_code', code);
     }
 
     // Navigate to room
-    router.push(`/room/${roomCode.toUpperCase()}`);
+    router.push(`/room/${code}`);
   };
   
   // v4.5.1: Show loading while checking for last room

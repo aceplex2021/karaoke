@@ -681,12 +681,14 @@ export default function RoomPage() {
     } catch (err: any) {
       console.error('[room] Failed to refresh room state:', err);
       // Phase 1: Check if it's a room expiry error (410 or 404)
-      const isRoomExpired = err.status === 410 || err.status === 404;
-      if (isRoomExpired) {
-        // Stop all polling and real-time subscriptions to prevent repeated 410 errors
+      if (err.status === 410 || err.status === 404) {
+        // Stop all polling and real-time subscriptions to prevent repeated errors
         stopAllUpdates();
-        
-        setError('Room expired or doesn\'t exist.');
+        setError(
+          err.status === 410
+            ? 'Room expired.'
+            : 'Room not found. Check the room code and try again.'
+        );
         setShowGoHomeButton(true);
         setRoom(null);
         setCurrentSong(null);
@@ -844,9 +846,17 @@ export default function RoomPage() {
       }
     } catch (err: any) {
       // Phase 1: Check if it's a room expiry error (410 or 404)
-      const isRoomExpired = err.status === 410 || err.status === 404;
-      if (isRoomExpired) {
-        setError('Room expired or doesn\'t exist.');
+      if (err.status === 410) {
+        setError('Room expired.');
+        setShowGoHomeButton(true);
+      } else if (err.status === 404) {
+        try {
+          localStorage.removeItem('current_room_code');
+          localStorage.removeItem('current_room_id');
+        } catch {
+          /* ignore */
+        }
+        setError(`Room not found (${code}). Check the code — O/0 and V/C look alike.`);
         setShowGoHomeButton(true);
       } else {
         // Real app error - preserve original message for troubleshooting
