@@ -2,10 +2,11 @@
  * Service Worker for Kara PWA
  *
  * Exists for install + share-target only.
- * ZERO caching. Do not intercept API or mutating requests.
+ * ZERO caching. Do not intercept fetches — broken respondWith(fetch)
+ * caused /room/* navigation network errors when the proxy blipped.
  */
 
-const VERSION = 'v4.0.1-phaseb';
+const VERSION = 'v4.0.2-phaseb-passthrough';
 
 self.addEventListener('install', () => {
   console.log('[SW] Installing version:', VERSION);
@@ -21,31 +22,8 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  const url = event.request.url || '';
-  const method = event.request.method || 'GET';
-
-  // Never touch YouTube / media embeds
-  if (
-    url.includes('youtube.com') ||
-    url.includes('youtube-nocookie.com') ||
-    url.includes('ytimg.com')
-  ) {
-    return;
-  }
-
-  // Critical: let browser handle API + non-GET so PWA join/create POSTs are reliable
-  try {
-    const path = new URL(url).pathname;
-    if (path.startsWith('/api/') || method !== 'GET') {
-      return;
-    }
-  } catch {
-    return;
-  }
-
-  event.respondWith(fetch(event.request));
-});
+// Do not call event.respondWith — let the browser handle all network I/O.
+self.addEventListener('fetch', () => {});
 
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
@@ -57,4 +35,4 @@ self.addEventListener('message', (event) => {
 });
 
 console.log('[SW] Service Worker loaded:', VERSION);
-console.log('[SW] API and non-GET requests are not intercepted');
+console.log('[SW] Passthrough mode — no fetch interception');

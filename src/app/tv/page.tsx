@@ -130,23 +130,30 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // ~200ms on Smart TV (coalesced POSTs) — was 100Hz crash; 750ms made secondary free-run/lead.
-  const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 200 : 100;
-  const SYNC_DRIFT_SEC = 0.12;
-  const SEEK_COOLDOWN_MS = 150;
+  // Primary posts often; secondary applies rarely (YouTube seek is coarse — tight drift = thrash).
+  const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 250 : 150;
+  const FOLLOWER_POLL_MS = 500;
+  const SYNC_DRIFT_SEC = 1.5;
+  const SEEK_COOLDOWN_MS = 2500;
+  const WALL_BOOTSTRAP_MAX_SEC = 15 * 60; // ignore absurd stale started_at
 
-  const readLocalPlayhead = useCallback((): { t: number; paused: boolean } | null => {
+  const readLocalPlayhead = useCallback((): {
+    t: number;
+    paused: boolean;
+    state: number | null;
+  } | null => {
     const yt = youtubePlayerRef.current;
     if (yt) {
       const state = yt.getPlayerState();
       return {
         t: yt.getCurrentTime(),
         paused: state === 2 || state === -1,
+        state,
       };
     }
     const video = videoRef.current;
     if (video && video.src) {
-      return { t: video.currentTime || 0, paused: video.paused };
+      return { t: video.currentTime || 0, paused: video.paused, state: null };
     }
     return null;
   }, []);
@@ -168,42 +175,48 @@ function TVModePageContent() {
     const currentId = currentSongRef.current?.id;
     if (!currentId || payload.entryId !== currentId) return;
 
-    // Follow primary time exactly (no ageSec — that made secondaries lead).
     const target = payload.t;
     const local = readLocalPlayhead();
+    const yt = youtubePlayerRef.current;
+    const video = videoRef.current;
+    if (!yt && !(video && video.src)) return;
+
+    // Never seek while YouTube is buffering — causes 1↔3 storms
+    if (local?.state === 3) return;
+
     const localT = local?.t ?? 0;
     const drift = Math.abs(localT - target);
     const now = Date.now();
     const canSeek =
       drift > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS;
 
-    const yt = youtubePlayerRef.current;
-    const video = videoRef.current;
-    // Player may not be ready yet — keep lastPlayhead and retry on next tick/poll
-    if (!yt && !(video && video.src)) return;
-
     if (canSeek) {
       lastFollowerSeekAtRef.current = now;
+      console.log('[tv] Secondary seek', {
+        from: localT.toFixed(1),
+        to: target.toFixed(1),
+        drift: drift.toFixed(1),
+      });
       if (yt) {
         yt.seekTo(target);
       } else if (video) {
         try {
           video.currentTime = target;
         } catch {
-          /* ignore seek errors */
+          /* ignore */
         }
       }
+      return; // let player settle; don't also toggle play this tick
     }
 
+    // Only change pause/play on mismatch — never spam play() every poll
     if (yt) {
-      if (payload.paused) yt.pause();
-      else yt.play();
+      const state = local?.state;
+      if (payload.paused && state !== 2) yt.pause();
+      else if (!payload.paused && (state === 2 || state === -1 || state === 5)) yt.play();
     } else if (video) {
-      if (payload.paused) {
-        video.pause();
-      } else if (video.paused) {
-        video.play().catch(() => {});
-      }
+      if (payload.paused && !video.paused) video.pause();
+      else if (!payload.paused && video.paused) video.play().catch(() => {});
     }
   }, [readLocalPlayhead]);
 
@@ -218,22 +231,25 @@ function TVModePageContent() {
     const roomId = room?.id;
     if (!roomId) return;
 
-    const tick = window.setInterval(() => {
-      if (isPrimaryTVRef.current) {
-        const entryId = currentSongRef.current?.id;
-        if (!entryId) return;
-        const local = readLocalPlayhead();
-        if (!local) return;
-        postPlayhead({
-          roomId,
-          entryId,
-          t: local.t,
-          paused: local.paused,
-          wallMs: Date.now(),
-        });
-        return;
-      }
+    let followerTimer: ReturnType<typeof setInterval> | null = null;
 
+    const primaryTick = window.setInterval(() => {
+      if (!isPrimaryTVRef.current) return;
+      const entryId = currentSongRef.current?.id;
+      if (!entryId) return;
+      const local = readLocalPlayhead();
+      if (!local) return;
+      postPlayhead({
+        roomId,
+        entryId,
+        t: local.t,
+        paused: local.paused,
+        wallMs: Date.now(),
+      });
+    }, SYNC_INTERVAL_MS);
+
+    const runFollowerPoll = () => {
+      if (isPrimaryTVRef.current) return;
       fetchLastPlayhead(roomId).then((p) => {
         if (isPrimaryTVRef.current) return;
         if (p?.entryId && typeof p.t === 'number') {
@@ -245,14 +261,15 @@ function TVModePageContent() {
           });
           return;
         }
-        // No hub playhead yet — nudge toward wall elapsed (bootstrap only)
+        // Wall fallback only if hub silent and wall looks sane
         const staleMs = Date.now() - lastPlayheadAtRef.current;
-        if (staleMs < 2000 && lastPlayheadAtRef.current > 0) return;
+        if (lastPlayheadAtRef.current > 0 && staleMs < 3000) return;
         const entryId = currentSongRef.current?.id;
-        const wallT = elapsedFromStartedAt(roomRef.current?.current_song_started_at);
+        let wallT = elapsedFromStartedAt(roomRef.current?.current_song_started_at);
+        if (wallT > WALL_BOOTSTRAP_MAX_SEC) return;
         if (!entryId || wallT <= 2) return;
         const local = readLocalPlayhead();
-        if (local && Math.abs(local.t - wallT) < 1.5) return;
+        if (local && Math.abs(local.t - wallT) < SYNC_DRIFT_SEC) return;
         applyFollowerPlayhead({
           entryId,
           t: wallT,
@@ -260,9 +277,14 @@ function TVModePageContent() {
           wallMs: Date.now(),
         });
       });
-    }, Math.max(SYNC_INTERVAL_MS, 250));
+    };
 
-    return () => clearInterval(tick);
+    followerTimer = window.setInterval(runFollowerPoll, FOLLOWER_POLL_MS);
+
+    return () => {
+      clearInterval(primaryTick);
+      if (followerTimer) clearInterval(followerTimer);
+    };
   }, [room?.id, readLocalPlayhead, applyFollowerPlayhead]);
 
   const getTvAdvanceOpts = () => {
@@ -710,15 +732,35 @@ function TVModePageContent() {
         }
       }
       
-      // Mid-song bootstrap: both use wall clock so secondary never starts at 0.
-      // Playhead (SSE + poll) then fine-tunes secondary to primary.
+      // Mid-song bootstrap: prefer hub playhead; wall only if sane (stale started_at can be huge)
       const initialState = await api.getRoomState(roomId);
-      const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
-      setSeekOffsetSeconds(offset);
-      seekOffsetRef.current = offset;
       playheadLoggedRef.current = false;
       lastPlayheadRef.current = null;
       lastPlayheadAtRef.current = 0;
+
+      let offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
+      if (offset > WALL_BOOTSTRAP_MAX_SEC) {
+        console.warn('[tv] Ignoring absurd wall bootstrap', offset.toFixed(0), 's');
+        offset = 0;
+      }
+
+      if (!isPrimary) {
+        const p = await fetchLastPlayhead(roomId);
+        if (p?.entryId && typeof p.t === 'number' && p.t > 2) {
+          offset = p.t;
+          lastPlayheadRef.current = {
+            entryId: p.entryId,
+            t: p.t,
+            paused: p.paused,
+            wallMs: p.wallMs,
+          };
+          lastPlayheadAtRef.current = Date.now();
+          console.log('[tv] Secondary bootstrap from hub playhead', p.t.toFixed(1), 's');
+        }
+      }
+
+      setSeekOffsetSeconds(offset);
+      seekOffsetRef.current = offset;
       if (offset > 2) {
         console.log(
           '[tv] Mid-song join — bootstrap seek',
@@ -729,22 +771,6 @@ function TVModePageContent() {
         );
       } else if (isPrimary && initialState.currentSong) {
         console.log('[tv] ✅ Primary TV - playing current song immediately');
-      }
-      // Try immediate playhead catch-up (primary may already be posting)
-      if (!isPrimary) {
-        const p = await fetchLastPlayhead(roomId);
-        if (p?.entryId && typeof p.t === 'number' && p.t > 2) {
-          setSeekOffsetSeconds(p.t);
-          seekOffsetRef.current = p.t;
-          lastPlayheadRef.current = {
-            entryId: p.entryId,
-            t: p.t,
-            paused: p.paused,
-            wallMs: p.wallMs,
-          };
-          lastPlayheadAtRef.current = Date.now();
-          console.log('[tv] Secondary bootstrap from hub playhead', p.t.toFixed(1), 's');
-        }
       }
       setJoinedMidSong(false);
       initialEntryIdRef.current = null;
