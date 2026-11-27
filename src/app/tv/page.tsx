@@ -130,12 +130,13 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Primary posts often; secondary applies rarely (YouTube seek is coarse — tight drift = thrash).
+  // Primary posts often; secondary corrects rarely. Frozen hub packets caused seek-to-60.3 thrash.
   const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 250 : 150;
-  const FOLLOWER_POLL_MS = 500;
-  const SYNC_DRIFT_SEC = 1.5;
-  const SEEK_COOLDOWN_MS = 2500;
-  const WALL_BOOTSTRAP_MAX_SEC = 15 * 60; // ignore absurd stale started_at
+  const FOLLOWER_POLL_MS = 750;
+  const SYNC_DRIFT_SEC = 2.5;
+  const SEEK_COOLDOWN_MS = 4000;
+  const PLAYHEAD_STALE_MS = 2000; // ignore hub packet older than this
+  const WALL_BOOTSTRAP_MAX_SEC = 15 * 60;
 
   const readLocalPlayhead = useCallback((): {
     t: number;
@@ -162,12 +163,27 @@ function TVModePageContent() {
     if (isPrimaryTVRef.current) return;
     if (!payload.entryId || !Number.isFinite(payload.t) || payload.t < 0) return;
 
-    lastPlayheadRef.current = payload;
-    lastPlayheadAtRef.current = Date.now();
+    const now = Date.now();
+    const wallMs = typeof payload.wallMs === 'number' ? payload.wallMs : now;
+    const ageMs = Math.max(0, now - wallMs);
+
+    // Hub can return a frozen last packet forever — never yank secondary to it
+    if (ageMs > PLAYHEAD_STALE_MS) {
+      return;
+    }
+
+    // Only treat as "alive" when packet is fresh
+    const prevWall = lastPlayheadRef.current?.wallMs ?? 0;
+    if (wallMs >= prevWall) {
+      lastPlayheadRef.current = { ...payload, wallMs };
+      lastPlayheadAtRef.current = now;
+    }
+
     if (!playheadLoggedRef.current) {
       playheadLoggedRef.current = true;
       console.log('[tv] Secondary received playhead', {
         t: payload.t.toFixed(1),
+        ageMs,
         entryId: payload.entryId,
       });
     }
@@ -175,27 +191,30 @@ function TVModePageContent() {
     const currentId = currentSongRef.current?.id;
     if (!currentId || payload.entryId !== currentId) return;
 
-    const target = payload.t;
+    // Extrapolate so a 500ms-old packet still tracks primary's expected time
+    const target = payload.paused ? payload.t : payload.t + ageMs / 1000;
+
     const local = readLocalPlayhead();
     const yt = youtubePlayerRef.current;
     const video = videoRef.current;
     if (!yt && !(video && video.src)) return;
-
-    // Never seek while YouTube is buffering — causes 1↔3 storms
-    if (local?.state === 3) return;
+    if (local?.state === 3) return; // buffering — don't seek
 
     const localT = local?.t ?? 0;
-    const drift = Math.abs(localT - target);
-    const now = Date.now();
+    const behind = target - localT; // >0 secondary is behind primary
+
+    // ONLY seek forward when behind. Seeking backward to a frozen/lagging primary
+    // (logs: from 63 → to 60.3 forever) causes endless buffer thrash.
     const canSeek =
-      drift > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS;
+      behind > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS;
 
     if (canSeek) {
       lastFollowerSeekAtRef.current = now;
-      console.log('[tv] Secondary seek', {
+      console.log('[tv] Secondary seek forward', {
         from: localT.toFixed(1),
         to: target.toFixed(1),
-        drift: drift.toFixed(1),
+        behind: behind.toFixed(1),
+        ageMs,
       });
       if (yt) {
         yt.seekTo(target);
@@ -206,10 +225,9 @@ function TVModePageContent() {
           /* ignore */
         }
       }
-      return; // let player settle; don't also toggle play this tick
+      return;
     }
 
-    // Only change pause/play on mismatch — never spam play() every poll
     if (yt) {
       const state = local?.state;
       if (payload.paused && state !== 2) yt.pause();
