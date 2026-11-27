@@ -231,8 +231,6 @@ function TVModePageContent() {
     const roomId = room?.id;
     if (!roomId) return;
 
-    let followerTimer: ReturnType<typeof setInterval> | null = null;
-
     const primaryTick = window.setInterval(() => {
       if (!isPrimaryTVRef.current) return;
       const entryId = currentSongRef.current?.id;
@@ -248,7 +246,7 @@ function TVModePageContent() {
       });
     }, SYNC_INTERVAL_MS);
 
-    const runFollowerPoll = () => {
+    const followerTick = window.setInterval(() => {
       if (isPrimaryTVRef.current) return;
       fetchLastPlayhead(roomId).then((p) => {
         if (isPrimaryTVRef.current) return;
@@ -277,13 +275,11 @@ function TVModePageContent() {
           wallMs: Date.now(),
         });
       });
-    };
-
-    followerTimer = window.setInterval(runFollowerPoll, FOLLOWER_POLL_MS);
+    }, FOLLOWER_POLL_MS);
 
     return () => {
-      clearInterval(primaryTick);
-      if (followerTimer) clearInterval(followerTimer);
+      window.clearInterval(primaryTick);
+      window.clearInterval(followerTick);
     };
   }, [room?.id, readLocalPlayhead, applyFollowerPlayhead]);
 
