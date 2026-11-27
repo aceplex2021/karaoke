@@ -11,7 +11,7 @@ import type { Room, QueueItem } from '@/shared/types';
 import { YouTubePlayer, type YouTubePlayerHandle } from '@/components/YouTubePlayer';
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
-import { supabase } from '@/lib/supabase'; // v4.4: Realtime sync
+import { connectRoomRealtime, postPlayhead } from '@/lib/realtime-client';
 
 /**
  * Format seconds to MM:SS or HH:MM:SS
@@ -58,8 +58,8 @@ function TVModePageContent() {
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
-  const syncChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastFollowerSeekAtRef = useRef(0);
+  const sseUnsubRef = useRef<(() => void) | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
@@ -84,7 +84,6 @@ function TVModePageContent() {
   const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
   const isPrimaryTVRef = useRef(false);
   const seekOffsetRef = useRef(0);
-  const realtimeChannelRef = useRef<any>(null); // v4.4: Supabase Realtime channel
   const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
   const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Real-time reconnection attempts counter
@@ -178,30 +177,10 @@ function TVModePageContent() {
     }
   }, [readLocalPlayhead]);
 
-  // Primary broadcasts playhead; secondary follows within ~100ms
+  // Primary posts playhead to server SSE hub; secondary applies follower sync
   useEffect(() => {
     const roomId = room?.id;
     if (!roomId) return;
-
-    if (syncChannelRef.current) {
-      supabase.removeChannel(syncChannelRef.current);
-      syncChannelRef.current = null;
-    }
-
-    const channel = supabase
-      .channel(`tv-sync-${roomId}`, {
-        config: { broadcast: { self: false } },
-      })
-      .on('broadcast', { event: 'playhead' }, ({ payload }) => {
-        applyFollowerPlayhead(payload as PlayheadPayload);
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[tv] ✅ Playhead sync channel ready');
-        }
-      });
-
-    syncChannelRef.current = channel;
 
     const tick = window.setInterval(() => {
       if (!isPrimaryTVRef.current) return;
@@ -209,27 +188,17 @@ function TVModePageContent() {
       if (!entryId) return;
       const local = readLocalPlayhead();
       if (!local) return;
-
-      channel.send({
-        type: 'broadcast',
-        event: 'playhead',
-        payload: {
-          entryId,
-          t: local.t,
-          paused: local.paused,
-          wallMs: Date.now(),
-        } satisfies PlayheadPayload,
+      postPlayhead({
+        roomId,
+        entryId,
+        t: local.t,
+        paused: local.paused,
+        wallMs: Date.now(),
       });
     }, SYNC_INTERVAL_MS);
 
-    return () => {
-      clearInterval(tick);
-      if (syncChannelRef.current) {
-        supabase.removeChannel(syncChannelRef.current);
-        syncChannelRef.current = null;
-      }
-    };
-  }, [room?.id, applyFollowerPlayhead, readLocalPlayhead]);
+    return () => clearInterval(tick);
+  }, [room?.id, readLocalPlayhead]);
 
   const elapsedFromStartedAt = (startedAt?: string | null): number => {
     if (!startedAt) return 0;
@@ -349,17 +318,10 @@ function TVModePageContent() {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
       }
-      // v4.4: Cleanup Realtime subscription
-      if (realtimeChannelRef.current) {
-        console.log('[tv] Cleaning up Realtime subscription');
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
+      if (sseUnsubRef.current) {
+        sseUnsubRef.current();
+        sseUnsubRef.current = null;
       }
-      if (syncChannelRef.current) {
-        supabase.removeChannel(syncChannelRef.current);
-        syncChannelRef.current = null;
-      }
-      // v4.8.0: Reset reconnect attempts
       reconnectAttemptsRef.current = 0;
     };
   }, [codeParam, roomIdParam]);
@@ -551,127 +513,16 @@ function TVModePageContent() {
    * Polls refreshState every 2.5 seconds
    */
   /**
-   * v4.4: Subscribe to Realtime updates for room changes
-   */
-  const subscribeToRoom = useCallback((roomId: string) => {
-    // Unsubscribe from previous channel if exists
-    if (realtimeChannelRef.current) {
-      console.log('[tv] Unsubscribing from previous Realtime channel');
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
-    }
-
-    console.log('[tv] Setting up Realtime subscription for room:', roomId);
-    
-    const channel = supabase
-      .channel(`room-${roomId}`)
-      // Subscribe to room changes (current_entry_id updates)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'kara_rooms',
-          filter: `id=eq.${roomId}`
-        },
-        (payload) => {
-          console.log('[tv] Realtime: Room updated', payload);
-          
-          // v5.0: Check if primary_tv_id changed
-          if (payload.new && payload.old && payload.new.primary_tv_id !== payload.old.primary_tv_id) {
-            const newPrimaryTvId = payload.new.primary_tv_id;
-            const currentTvId = localStorage.getItem('tv_id');
-            const isNowPrimary = newPrimaryTvId === currentTvId;
-            setIsPrimaryTV(isNowPrimary);
-            console.log('[tv] Primary TV changed:', isNowPrimary ? 'PRIMARY' : 'SECONDARY', '(TV ID:', currentTvId?.slice(0, 8), '...)');
-          }
-          
-          // Refresh state when room changes (especially current_entry_id)
-          refreshState(roomId);
-        }
-      )
-      // v4.4.1: Subscribe to queue changes (new songs added)
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // INSERT, UPDATE, DELETE
-          schema: 'public',
-          table: 'kara_queue',
-          filter: `room_id=eq.${roomId}`
-        },
-        (payload) => {
-          console.log('[tv] Realtime: Queue updated', payload.eventType, payload);
-          // Refresh state to get updated queue
-          refreshState(roomId);
-        }
-      )
-      .subscribe((status) => {
-        console.log('[tv] Realtime subscription status:', status);
-        
-        if (status === 'SUBSCRIBED') {
-          console.log('[tv] ✅ Realtime connected (room + queue)');
-          // Stop any fallback polling if it was running
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          // Reset reconnect attempts on successful connection
-          reconnectAttemptsRef.current = 0;
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('[tv] ❌ Realtime connection failed');
-          // v4.8.0: Attempt reconnection with retry logic
-          attemptRealtimeReconnect(roomId);
-        }
-      });
-    
-    realtimeChannelRef.current = channel;
-  }, [refreshState]);
-
-  /**
-   * v4.8.0: Attempt real-time reconnection with retry logic
-   */
-  const attemptRealtimeReconnect = useCallback((roomId: string) => {
-    reconnectAttemptsRef.current += 1;
-    
-    if (reconnectAttemptsRef.current > MAX_RECONNECT_ATTEMPTS) {
-      console.error('[tv] Max reconnection attempts reached. Falling back to polling.');
-      // After 5 retries, gracefully degrade to slower polling
-      setUseRealtime(false);
-      startPolling(roomId, FALLBACK_POLLING_INTERVAL);
-      return;
-    }
-    
-    console.log(`[tv] Attempting real-time reconnection (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
-    
-    setTimeout(() => {
-      // Clean up old channel
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
-      }
-      
-      // Retry real-time subscription
-      subscribeToRoom(roomId);
-    }, RECONNECT_DELAY_MS);
-  }, [subscribeToRoom]);
-
-  /**
    * Start polling room state (fallback mode)
-   * v4.8.0: Updated to accept custom interval parameter
    */
   const startPolling = useCallback((roomId: string, interval: number = FALLBACK_POLLING_INTERVAL) => {
-    // Stop any existing polling
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
-    
+
     console.log(`[tv] Starting polling fallback (${interval}ms interval)`);
-    
-    // Initial fetch
     refreshState(roomId);
-    
-    // Start polling with specified interval
     pollingIntervalRef.current = setInterval(() => {
       const currentRoomId = roomIdRef.current;
       if (currentRoomId) {
@@ -680,6 +531,73 @@ function TVModePageContent() {
       }
     }, interval);
   }, [refreshState]);
+
+  /**
+   * SSE realtime: room/queue NOTIFY fanout + playhead packets
+   */
+  const subscribeToRoom = useCallback((roomId: string) => {
+    if (sseUnsubRef.current) {
+      sseUnsubRef.current();
+      sseUnsubRef.current = null;
+    }
+
+    console.log('[tv] Setting up SSE realtime for room:', roomId);
+    let errorCount = 0;
+
+    const unsub = connectRoomRealtime(roomId, {
+      onReady: () => {
+        console.log('[tv] ✅ SSE realtime connected');
+        errorCount = 0;
+        reconnectAttemptsRef.current = 0;
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      },
+      onRoom: () => {
+        console.log('[tv] SSE: room/queue change');
+        refreshState(roomId).then(() => {
+          const currentTvId = localStorage.getItem('tv_id');
+          const primaryId = roomRef.current?.primary_tv_id;
+          if (currentTvId && primaryId) {
+            const isNowPrimary = primaryId === currentTvId;
+            if (isNowPrimary !== isPrimaryTVRef.current) {
+              setIsPrimaryTV(isNowPrimary);
+              console.log(
+                '[tv] Primary TV changed:',
+                isNowPrimary ? 'PRIMARY' : 'SECONDARY',
+                '(TV ID:',
+                currentTvId.slice(0, 8),
+                '...)'
+              );
+            }
+          }
+        });
+      },
+      onPlayhead: (payload) => {
+        if (!payload.entryId) return;
+        applyFollowerPlayhead({
+          entryId: payload.entryId,
+          t: payload.t,
+          paused: payload.paused,
+          wallMs: payload.wallMs,
+        });
+      },
+      onError: () => {
+        errorCount += 1;
+        console.error('[tv] ❌ SSE realtime error', errorCount);
+        if (errorCount >= MAX_RECONNECT_ATTEMPTS) {
+          console.error('[tv] Max SSE errors — falling back to polling');
+          setUseRealtime(false);
+          unsub();
+          sseUnsubRef.current = null;
+          startPolling(roomId, FALLBACK_POLLING_INTERVAL);
+        }
+      },
+    });
+
+    sseUnsubRef.current = unsub;
+  }, [refreshState, applyFollowerPlayhead, startPolling]);
 
   const loadRoom = async (roomId: string) => {
     try {
@@ -1312,12 +1230,15 @@ function TVModePageContent() {
                     }
 
                     if (newMode === 'primary') {
-                      const { error } = await supabase.rpc('set_primary_tv', {
-                        p_room_id: room.id,
-                        p_user_id: hostId,
-                        p_tv_id: tvId
+                      const res = await fetch(`/api/rooms/${room.id}/set-primary-tv`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: hostId, tv_id: tvId }),
                       });
-                      if (error) throw error;
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.error || 'Failed to set primary TV');
+                      }
                     } else {
                       if (!hasOtherTvs) {
                         alert('Cannot switch to secondary: No other TVs connected. Connect another TV first.');
@@ -1325,12 +1246,15 @@ function TVModePageContent() {
                       }
                       const otherTv = connectedTvs.find((id: string) => id !== tvId);
                       if (otherTv) {
-                        const { error } = await supabase.rpc('set_primary_tv', {
-                          p_room_id: room.id,
-                          p_user_id: hostId,
-                          p_tv_id: otherTv
+                        const res = await fetch(`/api/rooms/${room.id}/set-primary-tv`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ user_id: hostId, tv_id: otherTv }),
                         });
-                        if (error) throw error;
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          throw new Error(err.error || 'Failed to set primary TV');
+                        }
                       }
                     }
                   } catch (err: any) {

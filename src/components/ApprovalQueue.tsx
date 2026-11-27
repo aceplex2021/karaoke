@@ -13,7 +13,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { connectRoomRealtime } from '@/lib/realtime-client';
 import type { RoomParticipant } from '@/shared/types';
 
 interface ApprovalQueueProps {
@@ -43,7 +43,6 @@ export function ApprovalQueue({ roomId, hostId, onUpdate, onNewUser }: ApprovalQ
   const [useRealtime, setUseRealtime] = useState(true); // v4.4.1: Realtime toggle
   const seenUserIdsRef = useRef<Set<string>>(new Set());
   const hasFirstPollRef = useRef<boolean>(false); // Track if first poll completed (v4.4)
-  const realtimeChannelRef = useRef<any>(null); // v4.4.1: Realtime channel
   
   // v4.8.0: Fallback polling interval
   const FALLBACK_POLLING_INTERVAL = 7500; // 7.5 seconds
@@ -270,72 +269,36 @@ export function ApprovalQueue({ roomId, hostId, onUpdate, onNewUser }: ApprovalQ
     }
   };
 
-  // v4.4.1: Subscribe to Realtime updates for participants
   const subscribeToParticipants = useCallback(() => {
-    if (realtimeChannelRef.current) {
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
-    }
+    console.log('[ApprovalQueue] Setting up SSE for participants in room:', roomId);
+    return connectRoomRealtime(roomId, {
+      onReady: () => console.log('[ApprovalQueue] ✅ SSE connected'),
+      onRoom: () => {
+        console.log('[ApprovalQueue] SSE: room change — refresh participants');
+        fetchParticipants();
+      },
+      onError: () => {
+        console.error('[ApprovalQueue] ❌ SSE failed, falling back to polling');
+        setUseRealtime(false);
+      },
+    });
+  }, [roomId, fetchParticipants]);
 
-    console.log('[ApprovalQueue] 🔌 Setting up Realtime subscription for participants in room:', roomId);
-
-    const channel = supabase
-      .channel(`participants-${roomId}`)
-      .on(
-        'postgres_changes',
-        { 
-          event: '*', // Listen to INSERT, UPDATE, DELETE
-          schema: 'public', 
-          table: 'kara_room_participants', 
-          filter: `room_id=eq.${roomId}` 
-        },
-        (payload: any) => {
-          console.log(`[ApprovalQueue] 📡 Realtime: ${payload.eventType} event`, {
-            eventType: payload.eventType,
-            userId: payload.new?.user_id || payload.old?.user_id,
-            userName: payload.new?.user_name || payload.old?.user_name,
-            status: payload.new?.status || payload.old?.status
-          });
-          // Refresh immediately on any change
-          fetchParticipants();
-        }
-      )
-      .subscribe((status) => {
-        console.log('[ApprovalQueue] Realtime subscription status:', status);
-        if (status === 'SUBSCRIBED') {
-          console.log('[ApprovalQueue] ✅ Realtime connected (stable)');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('[ApprovalQueue] ❌ Realtime failed, falling back to polling');
-          setUseRealtime(false);
-        }
-      });
-
-    realtimeChannelRef.current = channel;
-  }, [roomId]); // FIXED: Only roomId dependency, fetchParticipants called directly
-
-  // Poll for all participants (v4.4.1 - FIXED: removed functions from dependencies)
   useEffect(() => {
-    // Initial fetch
     fetchParticipants();
 
-    // v4.8.0: Use Realtime if enabled, otherwise poll (no backup polling)
     if (useRealtime) {
-      subscribeToParticipants();
-      // No backup polling - trust real-time fully
+      const unsub = subscribeToParticipants();
       return () => {
-        if (realtimeChannelRef.current) {
-          console.log('[ApprovalQueue] Cleaning up Realtime subscription');
-          supabase.removeChannel(realtimeChannelRef.current);
-          realtimeChannelRef.current = null;
-        }
+        console.log('[ApprovalQueue] Cleaning up SSE subscription');
+        unsub();
       };
-    } else {
-      // v4.8.0: Graceful degradation - slower polling (7.5s instead of 3s)
-      const interval = setInterval(() => fetchParticipants(), FALLBACK_POLLING_INTERVAL);
-      return () => clearInterval(interval);
     }
+
+    const interval = setInterval(() => fetchParticipants(), FALLBACK_POLLING_INTERVAL);
+    return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, useRealtime]); // ONLY roomId and useRealtime - functions handled via useCallback
+  }, [roomId, useRealtime]);
 
   const totalCount = participants.length;
   const pendingCount = categorized.pending.length;

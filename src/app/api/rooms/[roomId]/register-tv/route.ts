@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
+import { notifyRoom } from '@/server/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,16 @@ export async function POST(
       p_tv_id: tv_id,
     });
     if (addTvError) {
-      console.warn('[API] Failed to add TV to connected list:', addTvError);
+      // Fallback without RPC: append in app
+      console.warn('[API] add_connected_tv RPC failed, using fallback:', addTvError.message);
+      const list = Array.isArray(room.connected_tv_ids) ? [...room.connected_tv_ids] : [];
+      if (!list.includes(tv_id)) {
+        list.push(tv_id);
+        await supabaseAdmin
+          .from('kara_rooms')
+          .update({ connected_tv_ids: list })
+          .eq('id', roomId);
+      }
     }
 
     let isPrimary = false;
@@ -49,7 +59,6 @@ export async function POST(
       isPrimary = true;
       console.log('[API] TV', tv_id, 'is already PRIMARY');
     } else if (!room.primary_tv_id) {
-      // Atomic claim — only wins if still null
       const { data: claimed, error: claimError } = await supabaseAdmin
         .from('kara_rooms')
         .update({ primary_tv_id: tv_id })
@@ -70,7 +79,6 @@ export async function POST(
         isPrimary = true;
         console.log('[API] TV', tv_id, 'registered as PRIMARY (atomic)');
       } else {
-        // Lost race — re-read winner
         const { data: refreshed } = await supabaseAdmin
           .from('kara_rooms')
           .select('primary_tv_id')
@@ -87,6 +95,8 @@ export async function POST(
       isPrimary = false;
       console.log('[API] TV', tv_id, 'registered as SECONDARY');
     }
+
+    await notifyRoom(roomId, 'tv_register');
 
     return NextResponse.json({
       success: true,

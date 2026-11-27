@@ -3,9 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { supabase } from '@/lib/supabase';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop, isIPad } from '@/lib/utils';
+import { connectRoomRealtime } from '@/lib/realtime-client';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
 import { useToast } from '@/components/Toast';
 import { VersionCard } from '@/components/VersionCard';
@@ -599,7 +598,7 @@ export default function RoomPage() {
   const roomIdRef = useRef<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const approvalCheckIntervalRef = useRef<NodeJS.Timeout | null>(null); // Polling for approval status
-  const realtimeChannelRef = useRef<RealtimeChannel | null>(null); // v4.8.0: Real-time channel
+  const realtimeUnsubRef = useRef<(() => void) | null>(null); // Phase B: SSE unsub
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Reconnection attempts counter
   const hasCheckedNameRef = useRef(false); // Fix: Prevent double execution in React Strict Mode
   
@@ -635,10 +634,9 @@ export default function RoomPage() {
       console.log('[room] Polling stopped');
     }
     
-    // Unsubscribe from real-time
-    if (realtimeChannelRef.current) {
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
+    if (realtimeUnsubRef.current) {
+      realtimeUnsubRef.current();
+      realtimeUnsubRef.current = null;
       console.log('[room] Real-time subscription stopped');
     }
     
@@ -699,117 +697,14 @@ export default function RoomPage() {
     }
   }, [user?.id, stopAllUpdates]);
 
-  /**
-   * v4.8.0: Subscribe to real-time updates for room and queue
-   */
-  const subscribeToRoom = useCallback((roomId: string) => {
-    // Unsubscribe from previous channel if exists
-    if (realtimeChannelRef.current) {
-      console.log('[room] Unsubscribing from previous real-time channel');
-      supabase.removeChannel(realtimeChannelRef.current);
-      realtimeChannelRef.current = null;
-    }
-
-    console.log('[room] Setting up real-time subscription for room:', roomId);
-    
-    const channel = supabase
-      .channel(`room-${roomId}`)
-      // Subscribe to room metadata changes
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'kara_rooms',
-          filter: `id=eq.${roomId}`
-        },
-        (payload) => {
-          console.log('[room] Real-time: Room updated', payload);
-          refreshRoomState(roomId);
-        }
-      )
-      // Subscribe to queue changes (INSERT, UPDATE, DELETE)
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // All events
-          schema: 'public',
-          table: 'kara_queue',
-          filter: `room_id=eq.${roomId}`
-        },
-        (payload) => {
-          console.log('[room] Real-time: Queue updated', payload.eventType, payload);
-          refreshRoomState(roomId);
-        }
-      )
-      .subscribe((status) => {
-        console.log('[room] Real-time subscription status:', status);
-        
-        if (status === 'SUBSCRIBED') {
-          console.log('[room] ✅ Real-time connected');
-          // Stop any fallback polling if it was running
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          // Reset reconnect attempts on successful connection
-          reconnectAttemptsRef.current = 0;
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.error('[room] ❌ Real-time connection failed');
-          // Attempt reconnection with retry logic
-          attemptRealtimeReconnect(roomId);
-        }
-      });
-    
-    realtimeChannelRef.current = channel;
-  }, [refreshRoomState]);
-
-  /**
-   * v4.8.0: Attempt real-time reconnection with retry logic
-   */
-  const attemptRealtimeReconnect = useCallback((roomId: string) => {
-    reconnectAttemptsRef.current += 1;
-    
-    if (reconnectAttemptsRef.current > MAX_RECONNECT_ATTEMPTS) {
-      console.error('[room] Max reconnection attempts reached. Falling back to polling.');
-      // After 5 retries, gracefully degrade to slower polling
-      setUseRealtime(false);
-      startPolling(roomId, FALLBACK_POLLING_INTERVAL);
-      showError('Using slower updates. Refresh page for better experience.');
-      return;
-    }
-    
-    console.log(`[room] Attempting real-time reconnection (${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})`);
-    
-    setTimeout(() => {
-      // Clean up old channel
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
-      }
-      
-      // Retry real-time subscription
-      subscribeToRoom(roomId);
-    }, RECONNECT_DELAY_MS);
-  }, [subscribeToRoom, showError]);
-
-  /**
-   * Start polling room state (fallback mode)
-   * v4.8.0: Updated to accept custom interval parameter
-   */
   const startPolling = useCallback((roomId: string, interval: number = FALLBACK_POLLING_INTERVAL) => {
-    // Stop any existing polling
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
-    
+
     console.log(`[room] Starting polling fallback (${interval}ms interval)`);
-    
-    // Initial fetch
     refreshRoomState(roomId);
-    
-    // Start polling with specified interval
     pollingIntervalRef.current = setInterval(() => {
       const currentRoomId = roomIdRef.current;
       if (currentRoomId) {
@@ -818,6 +713,45 @@ export default function RoomPage() {
       }
     }, interval);
   }, [refreshRoomState]);
+
+  const subscribeToRoom = useCallback((roomId: string) => {
+    if (realtimeUnsubRef.current) {
+      realtimeUnsubRef.current();
+      realtimeUnsubRef.current = null;
+    }
+
+    console.log('[room] Setting up SSE realtime for room:', roomId);
+    let errorCount = 0;
+
+    const unsub = connectRoomRealtime(roomId, {
+      onReady: () => {
+        console.log('[room] ✅ SSE realtime connected');
+        errorCount = 0;
+        reconnectAttemptsRef.current = 0;
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      },
+      onRoom: () => {
+        console.log('[room] SSE: room/queue change');
+        refreshRoomState(roomId);
+      },
+      onError: () => {
+        errorCount += 1;
+        console.error('[room] ❌ SSE error', errorCount);
+        if (errorCount >= MAX_RECONNECT_ATTEMPTS) {
+          setUseRealtime(false);
+          unsub();
+          realtimeUnsubRef.current = null;
+          startPolling(roomId, FALLBACK_POLLING_INTERVAL);
+          showError('Using slower updates. Refresh page for better experience.');
+        }
+      },
+    });
+
+    realtimeUnsubRef.current = unsub;
+  }, [refreshRoomState, startPolling, showError]);
 
   /**
    * Check user's approval status in room
@@ -960,17 +894,15 @@ export default function RoomPage() {
             const fingerprint = getOrCreateFingerprint();
             console.log('[Room] No name in localStorage, checking database for fingerprint:', fingerprint);
             
-            // Direct client-side query (no Vercel invocation) - cost optimized
-            const { data: dbUser, error } = await supabase
-              .from('kara_users')
-              .select('id, display_name, fingerprint')
-              .eq('fingerprint', fingerprint)
-              .single();
-            
-            if (!error && dbUser?.display_name) {
-              storedName = dbUser.display_name;
-              // Store in localStorage for future use
-              if (storedName) {
+            const res = await fetch(
+              `/api/users/by-fingerprint?fingerprint=${encodeURIComponent(fingerprint)}`,
+              { cache: 'no-store' }
+            );
+            if (res.ok) {
+              const body = await res.json();
+              const name = body?.user?.display_name;
+              if (name) {
+                storedName = name as string;
                 localStorage.setItem('user_display_name', storedName);
                 console.log('[Room] Found name in database:', storedName);
               }
@@ -1014,9 +946,9 @@ export default function RoomPage() {
       }
       
       // v4.8.0: Cleanup real-time
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
+      if (realtimeUnsubRef.current) {
+        realtimeUnsubRef.current();
+        realtimeUnsubRef.current = null;
       }
       
       // v4.8.0: Reset reconnect attempts
@@ -1831,7 +1763,7 @@ export default function RoomPage() {
     }
   }, [user, room, showError]);
 
-  // v5.0: Set primary TV (host-only, direct Supabase RPC - no API call)
+  // v5.0 / Phase B: Set primary TV via API (works on local PG)
   const handleSetPrimaryTV = useCallback(async (tvId: string) => {
     if (!room || !user || !isHost) {
       showError('Only host can change primary TV');
@@ -1845,25 +1777,17 @@ export default function RoomPage() {
 
     setSettingPrimaryTv(true);
     try {
-      // Call database function via Supabase RPC (cost-optimized, no Vercel invocation)
-      const { data, error } = await supabase.rpc('set_primary_tv', {
-        p_room_id: room.id,
-        p_user_id: user.id,
-        p_tv_id: tvId.trim()
+      const res = await fetch(`/api/rooms/${room.id}/set-primary-tv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, tv_id: tvId.trim() }),
       });
-
-      if (error) {
-        throw error;
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || 'Failed to update primary TV');
       }
-
-      if (data) {
-        success('Primary TV updated successfully');
-        // Real-time subscription will automatically update room state
-        // Refresh room state to get updated primary_tv_id and connected TVs
-        await refreshRoomState(room.id);
-      } else {
-        showError('Failed to update primary TV');
-      }
+      success('Primary TV updated successfully');
+      await refreshRoomState(room.id);
     } catch (err: any) {
       console.error('[handleSetPrimaryTV] Failed:', err);
       showError(err.message || 'Failed to update primary TV');

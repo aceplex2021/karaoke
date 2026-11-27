@@ -16,6 +16,9 @@ services:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
+      # Phase B: set DATABASE_URL in .env to use local Patroni karaoke DB
+      DATABASE_URL: ${DATABASE_URL:-}
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
     restart: unless-stopped
     # LAN smoke-test access; public traffic goes through cloudflared (no host publish required)
     ports:

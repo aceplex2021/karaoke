@@ -1,12 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
+import { useLocalPg } from '@/server/lib/db';
+import { pgAdmin } from '@/server/lib/pg-admin';
 
-// Server-side Supabase client with service role key for admin operations
-// ENFORCE: No caching by design
-export const supabaseAdmin = createClient(
-  config.supabase.url,
-  config.supabase.serviceRoleKey,
-  {
+/**
+ * Server DB admin client.
+ * - DATABASE_URL set  → local Patroni `karaoke` via pg (Phase B)
+ * - otherwise         → Supabase service role (rollback)
+ */
+function createSupabaseAdmin() {
+  return createClient(config.supabase.url, config.supabase.serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -18,12 +21,19 @@ export const supabaseAdmin = createClient(
         'Expires': '0',
       },
     },
-  }
-);
+  });
+}
 
-// Client-side Supabase client (for use in API routes that need user context)
+// Cast pg shim to Supabase client type so existing route typings keep working
+export const supabaseAdmin = (
+  useLocalPg ? pgAdmin : createSupabaseAdmin()
+) as ReturnType<typeof createSupabaseAdmin>;
+
 export const createSupabaseClient = (accessToken?: string) => {
-  const client = createClient(config.supabase.url, config.supabase.anonKey, {
+  if (useLocalPg) {
+    throw new Error('Browser/user Supabase client is disabled when DATABASE_URL is set');
+  }
+  return createClient(config.supabase.url, config.supabase.anonKey, {
     global: {
       headers: accessToken
         ? {
@@ -32,6 +42,6 @@ export const createSupabaseClient = (accessToken?: string) => {
         : {},
     },
   });
-  return client;
 };
 
+export { useLocalPg };
