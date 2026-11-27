@@ -151,6 +151,7 @@ export async function GET(
           title,
           artist,
           user_name,
+          duration: videoFile?.duration_seconds || data.metadata?.duration || null,
           version,
           song,
           user

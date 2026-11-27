@@ -83,6 +83,11 @@ interface YouTubePlayerProps {
    * Mute audio (default: false) - v4.3 for secondary TVs
    */
   muted?: boolean;
+
+  /**
+   * Seek to this offset (seconds) once the player is ready — multi-TV catch-up
+   */
+  startAtSeconds?: number;
 }
 
 export function YouTubePlayer({
@@ -97,11 +102,14 @@ export function YouTubePlayer({
   height = '100%',
   controls = true,
   muted = false,
+  startAtSeconds = 0,
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const onTimeUpdateRef = useRef(onTimeUpdate);
+  const mutedRef = useRef(muted);
+  const startAtRef = useRef(startAtSeconds);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +117,28 @@ export function YouTubePlayer({
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate;
   }, [onTimeUpdate]);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
+  useEffect(() => {
+    startAtRef.current = startAtSeconds;
+  }, [startAtSeconds]);
+
+  // Reactive mute/unmute when primary/secondary switches mid-song
+  useEffect(() => {
+    if (!isReady || !playerRef.current) return;
+    try {
+      if (muted) {
+        playerRef.current.mute?.();
+      } else {
+        playerRef.current.unMute?.();
+      }
+    } catch (e) {
+      console.warn('[YouTubePlayer] mute toggle failed', e);
+    }
+  }, [muted, isReady]);
 
   // Extract video ID
   const videoId = extractYouTubeId(videoUrl);
@@ -414,11 +444,24 @@ export function YouTubePlayer({
       }
     }
     
-    // Mute if secondary TV (v4.3)
-    if (muted && event.target) {
+    // Mute if secondary TV (v4.3) — also mirrored by muted useEffect
+    if (mutedRef.current && event.target) {
       event.target.mute();
       console.log('[YouTubePlayer] Muted (secondary TV)');
     }
+
+    // Multi-TV: catch up to elapsed wall-clock offset
+    const seekTo = startAtRef.current;
+    if (seekTo > 2 && event.target && typeof event.target.seekTo === 'function') {
+      try {
+        event.target.seekTo(seekTo, true);
+        console.log('[YouTubePlayer] Seeked to', seekTo, 's for multi-TV sync');
+      } catch (e) {
+        console.warn('[YouTubePlayer] seekTo failed', e);
+      }
+    }
+
+    setIsReady(true);
     
     if (onReady) {
       // Pass event object so caller can access player instance via event.target
@@ -432,20 +475,17 @@ export function YouTubePlayer({
     intervalRef.current = setInterval(() => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         const currentTime = playerRef.current.getCurrentTime();
-        const duration = playerRef.current.getDuration();
+        let duration = playerRef.current.getDuration();
         const cb = onTimeUpdateRef.current;
-        if (
-          cb &&
-          typeof currentTime === 'number' &&
-          typeof duration === 'number' &&
-          Number.isFinite(currentTime) &&
-          Number.isFinite(duration) &&
-          duration > 0
-        ) {
+        if (cb && typeof currentTime === 'number' && Number.isFinite(currentTime)) {
+          // Pass duration even when 0 so parent can fall back to metadata
+          if (typeof duration !== 'number' || !Number.isFinite(duration)) {
+            duration = 0;
+          }
           cb(currentTime, duration);
         }
       }
-    }, 500); // Update every 500ms
+    }, 250);
   };
 
   const handleStateChange = (event: any) => {

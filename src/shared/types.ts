@@ -16,6 +16,7 @@ export interface Room {
   approval_mode?: 'auto' | 'approval'; // v4.0: Join approval mode
   primary_tv_id?: string | null; // v4.3: ID of primary TV (has audio)
   connected_tv_ids?: string[] | null; // v5.0: Array of connected TV IDs (JSONB)
+  current_song_started_at?: string | null; // Wall clock when current song started (multi-TV seek)
 }
 
 export interface User {
@@ -141,6 +142,7 @@ export interface QueueItem {
   source_type?: 'database' | 'youtube';
   youtube_url?: string | null;
   version_id?: string | null; // For database songs
+  duration?: number | null; // Seconds when known (from file metadata)
   // Joined data
   song?: Song;
   user?: User;

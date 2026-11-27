@@ -2500,7 +2500,7 @@ export default function RoomPage() {
                       onClick={async () => {
                         if (!room) return;
                         try {
-                          await api.advancePlayback(room.id);
+                          await api.advancePlayback(room.id, { userId: user?.id });
                           success('Skipped to next song');
                         } catch (err: any) {
                           console.error('[room] Failed to skip:', err);

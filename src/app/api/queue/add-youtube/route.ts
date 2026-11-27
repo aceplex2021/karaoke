@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
 import { extractYouTubeId, isValidYouTubeUrl } from '@/lib/youtube';
 import { appConfig } from '@/lib/config';
+import { nextAppendPosition, renumberPendingPositions } from '@/server/lib/queue-order';
 
 export async function POST(request: NextRequest) {
   try {
@@ -163,9 +164,7 @@ export async function POST(request: NextRequest) {
           .limit(1);
         
         roundNumber = userRounds?.[0]?.round_number ? userRounds[0].round_number + 1 : 1;
-        
-        // Position will be recalculated by trigger/function
-        position = 1; // Temporary, will be updated
+        position = await nextAppendPosition(room_id);
       }
     } else {
       // FIFO: Add to end with spacing
@@ -213,6 +212,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    await renumberPendingPositions(room_id);
     console.log('[API] Successfully added to queue:', queueItem);
 
     // v4.4: Auto-start first song - if no song is currently playing, start this one
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
       // Update song status to 'playing'
       const { error: songError } = await supabaseAdmin
         .from('kara_queue')
-        .update({ status: 'playing' })
+        .update({ status: 'playing', started_at: new Date().toISOString() })
         .eq('id', queueItem.id);
       
       if (songError) {
@@ -230,10 +230,13 @@ export async function POST(request: NextRequest) {
         // Don't fail the request
       }
       
-      // Set as current song
+      // Set as current song + start timestamp for multi-TV seek
       const { error: roomError } = await supabaseAdmin
         .from('kara_rooms')
-        .update({ current_entry_id: queueItem.id })
+        .update({
+          current_entry_id: queueItem.id,
+          current_song_started_at: new Date().toISOString(),
+        })
         .eq('id', room_id);
       
       if (roomError) {

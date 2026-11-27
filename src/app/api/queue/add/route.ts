@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
+import { nextAppendPosition, renumberPendingPositions } from '@/server/lib/queue-order';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
@@ -101,8 +102,7 @@ export async function POST(request: NextRequest) {
       position = (maxData?.position || 0) + 1;
     } else {
       sortKey = sortKeyData as number;
-      // Position will be calculated from sort_key order
-      position = 1; // Temporary, will be updated by reorder function
+      position = await nextAppendPosition(room_id);
     }
     
     // 3. Calculate round_number for round-robin mode
@@ -170,6 +170,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Keep position aligned with sort_key visual order
+    await renumberPendingPositions(room_id);
     
     // v4.4: Auto-start first song - if no song is currently playing, start this one
     if (!room.current_entry_id) {
@@ -178,7 +181,7 @@ export async function POST(request: NextRequest) {
       // Update song status to 'playing'
       const { error: songError } = await supabaseAdmin
         .from('kara_queue')
-        .update({ status: 'playing' })
+        .update({ status: 'playing', started_at: new Date().toISOString() })
         .eq('id', data.id);
       
       if (songError) {
@@ -186,10 +189,13 @@ export async function POST(request: NextRequest) {
         // Don't fail the request
       }
       
-      // Set as current song
+      // Set as current song + start timestamp for multi-TV seek
       const { error: roomError } = await supabaseAdmin
         .from('kara_rooms')
-        .update({ current_entry_id: data.id })
+        .update({
+          current_entry_id: data.id,
+          current_song_started_at: new Date().toISOString(),
+        })
         .eq('id', room_id);
       
       if (roomError) {

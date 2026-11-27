@@ -243,7 +243,10 @@ export const api = {
    * Called when video ends or "Play Next" clicked
    * Atomic state transition: current→completed, next→playing
    */
-  async advancePlayback(roomId: string): Promise<{ success: boolean; advanced: boolean }> {
+  async advancePlayback(
+    roomId: string,
+    opts?: { tvId?: string; userId?: string }
+  ): Promise<{ success: boolean; advanced: boolean }> {
     const res = await fetch(`${API_BASE}/rooms/${roomId}/advance`, {
       method: 'POST',
       headers: { 
@@ -251,7 +254,11 @@ export const api = {
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache'
       },
-      cache: 'no-store'
+      cache: 'no-store',
+      body: JSON.stringify({
+        tv_id: opts?.tvId || undefined,
+        user_id: opts?.userId || undefined,
+      }),
     });
     
     if (!res.ok) {

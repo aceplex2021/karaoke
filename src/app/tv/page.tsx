@@ -52,7 +52,8 @@ function TVModePageContent() {
   const [tvUserId, setTvUserId] = useState<string | null>(null); // Host user ID from localStorage
   const [tvId, setTvId] = useState<string | null>(null); // Unique ID for this TV instance
   const [isPrimaryTV, setIsPrimaryTV] = useState(false); // Is this the primary TV (with audio)?
-  const [joinedMidSong, setJoinedMidSong] = useState(false); // v4.4: Did TV join while song was playing?
+  const [joinedMidSong, setJoinedMidSong] = useState(false); // legacy flag (no longer freezes playback)
+  const [seekOffsetSeconds, setSeekOffsetSeconds] = useState(0); // multi-TV catch-up
   const [useRealtime, setUseRealtime] = useState(true); // v4.4: Use Realtime (fallback to polling if false)
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -78,10 +79,38 @@ function TVModePageContent() {
   const roomRef = useRef<Room | null>(null);
   const playingQueueItemIdRef = useRef<string | null>(null); // Track which queue item ID is actually playing
   const isAdvancingRef = useRef<boolean>(false); // Prevent double-firing of handleEnded
+  const isPrimaryTVRef = useRef(false);
+  const seekOffsetRef = useRef(0);
   const realtimeChannelRef = useRef<any>(null); // v4.4: Supabase Realtime channel
   const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
   const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Real-time reconnection attempts counter
+
+  useEffect(() => {
+    isPrimaryTVRef.current = isPrimaryTV;
+  }, [isPrimaryTV]);
+
+  useEffect(() => {
+    seekOffsetRef.current = seekOffsetSeconds;
+  }, [seekOffsetSeconds]);
+
+  // Keep HTML5 mute in sync when primary/secondary flips mid-song
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = !isPrimaryTV;
+    }
+  }, [isPrimaryTV]);
+
+  const elapsedFromStartedAt = (startedAt?: string | null): number => {
+    if (!startedAt) return 0;
+    const elapsed = (Date.now() - new Date(startedAt).getTime()) / 1000;
+    return Number.isFinite(elapsed) && elapsed > 2 ? elapsed : 0;
+  };
+
+  const getTvAdvanceOpts = () => {
+    const id = tvId || (typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null);
+    return id ? { tvId: id } : {};
+  };
   
   // v4.8.0: Real-time constants
   const MAX_RECONNECT_ATTEMPTS = 5;
@@ -221,18 +250,37 @@ function TVModePageContent() {
   }, [currentSong?.id]);
 
   // Up Next banner: last 90s when there is a queued next singer.
-  // Hysteresis avoids YouTube time jitter toggling the banner on/off (looks "stuck").
+  // Fall back to queue/song metadata duration when YouTube reports 0.
   useEffect(() => {
     if (!upNext || !currentSong) {
       setShowUpNextBanner(false);
       return;
     }
-    if (!Number.isFinite(duration) || !Number.isFinite(currentTime) || duration <= 0) {
+
+    const metaDuration =
+      (typeof currentSong.duration === 'number' && currentSong.duration > 0
+        ? currentSong.duration
+        : null) ||
+      (typeof currentSong.song?.duration === 'number' && currentSong.song.duration > 0
+        ? currentSong.song.duration
+        : null) ||
+      0;
+    const effectiveDuration = duration > 0 ? duration : metaDuration;
+
+    if (!Number.isFinite(effectiveDuration) || !Number.isFinite(currentTime) || effectiveDuration <= 0) {
+      if (currentTime > 30) {
+        console.log('[tv] Up Next banner gated — no duration', {
+          playerDuration: duration,
+          metaDuration,
+          currentTime,
+          upNext: upNext.title,
+        });
+      }
       setShowUpNextBanner(false);
       return;
     }
 
-    const timeRemaining = duration - currentTime;
+    const timeRemaining = effectiveDuration - currentTime;
     setShowUpNextBanner((visible) => {
       if (timeRemaining <= 0.5) return false;
       if (!visible && timeRemaining <= 90) {
@@ -240,10 +288,10 @@ function TVModePageContent() {
           title: upNext.title,
           singer: upNext.user_name,
           timeRemaining,
+          effectiveDuration,
         });
         return true;
       }
-      // Stay visible until near end once entered the window (no flicker at ~90s boundary)
       if (visible && timeRemaining <= 95) return true;
       return false;
     });
@@ -286,6 +334,7 @@ function TVModePageContent() {
       // Only update if this is still the latest request
       if (requestId === requestIdRef.current) {
         console.log('[tv] refreshState current_entry_id:', state.room.current_entry_id);
+        const prevEntryId = roomRef.current?.current_entry_id;
         setRoom(state.room);
         roomRef.current = state.room;
         // Always use currentSong from backend (based on room.current_entry_id)
@@ -294,6 +343,12 @@ function TVModePageContent() {
         currentSongRef.current = state.currentSong;
         setQueue(state.queue);
         setUpNext(state.upNext);
+        // New song → refresh seek offset for multi-TV catch-up
+        if (state.room.current_entry_id !== prevEntryId) {
+          const offset = elapsedFromStartedAt(state.room.current_song_started_at);
+          setSeekOffsetSeconds(offset);
+          seekOffsetRef.current = offset;
+        }
         console.log('[tv] refreshState done', state.room.current_entry_id, state.queue.length, state.currentSong?.song?.title || 'no song');
       }
     } catch (err: any) {
@@ -488,18 +543,17 @@ function TVModePageContent() {
         }
       }
       
-      // v4.4.1: Check if TV joined mid-song (ONLY for secondary TVs)
+      // Phase A: mid-song join seeks via current_song_started_at (no full-song freeze)
       const initialState = await api.getRoomState(roomId);
-      if (!isPrimary && initialState.currentSong && initialState.room.current_entry_id) {
-        console.log('[tv] ⚠️ Secondary TV joined mid-song - will wait for next song');
-        setJoinedMidSong(true);
-        initialEntryIdRef.current = initialState.room.current_entry_id;
-      } else {
-        if (isPrimary && initialState.currentSong) {
-          console.log('[tv] ✅ Primary TV - playing current song immediately');
-        }
-        setJoinedMidSong(false);
-        initialEntryIdRef.current = null;
+      const offset = elapsedFromStartedAt(initialState.room.current_song_started_at);
+      setSeekOffsetSeconds(offset);
+      seekOffsetRef.current = offset;
+      setJoinedMidSong(false);
+      initialEntryIdRef.current = null;
+      if (offset > 2) {
+        console.log('[tv] Mid-song join — will seek to', offset.toFixed(1), 's (primary=', isPrimary, ')');
+      } else if (isPrimary && initialState.currentSong) {
+        console.log('[tv] ✅ Primary TV - playing current song immediately');
       }
       
       // v4.4: Use Realtime subscription with polling fallback
@@ -537,12 +591,15 @@ function TVModePageContent() {
    */
   const handleManualAdvance = async () => {
     if (!room) return;
+    if (!isPrimaryTVRef.current) {
+      setError('Only primary TV can skip');
+      return;
+    }
     
     console.log('[tv] Manual advance triggered');
     try {
-      await api.advancePlayback(room.id);
+      await api.advancePlayback(room.id, getTvAdvanceOpts());
       console.log('[tv] /advance succeeded (manual)');
-      // UI does NOTHING - waits for next poll (≤3s)
     } catch (err: any) {
       console.error('[tv] Failed to advance manually:', err);
       setError('Failed to skip to next song');
@@ -567,13 +624,18 @@ function TVModePageContent() {
   const handlePlaybackError = useCallback(async () => {
     console.error('[tv] Playback error - advancing to next song');
     setError('Playback error - skipping to next song');
+
+    if (!isPrimaryTVRef.current) {
+      console.log('[tv] Secondary TV — not advancing after error');
+      return;
+    }
     
     const latestRoom = roomRef.current;
     if (latestRoom) {
       try {
-        await api.advancePlayback(latestRoom.id);
+        const id = typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null;
+        await api.advancePlayback(latestRoom.id, id ? { tvId: id } : {});
         console.log('[tv] /advance succeeded after error');
-        // Clear error after a short delay
         setTimeout(() => setError(''), 3000);
       } catch (err) {
         console.error('[tv] Failed to advance after error:', err);
@@ -613,20 +675,23 @@ function TVModePageContent() {
       });
       return;
     }
+
+    // Only primary TV advances — secondaries follow via Realtime
+    if (!isPrimaryTVRef.current) {
+      console.log('[tv] Secondary TV onEnded — waiting for primary to advance');
+      return;
+    }
     
     // Mark as processing to prevent double-firing
     isAdvancingRef.current = true;
     
     console.log('[tv] onEnded verified - calling /advance for room:', latestRoom.id, 'queue item:', playingQueueItemId);
     try {
-      // Call /advance endpoint (atomic state transition)
-      await api.advancePlayback(latestRoom.id);
+      const id = typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null;
+      await api.advancePlayback(latestRoom.id, id ? { tvId: id } : {});
       console.log('[tv] /advance succeeded');
-      // Clear playing queue item ID and video src to force reload of next song
       playingQueueItemIdRef.current = null;
       currentVideoSrcRef.current = null;
-      // Trigger immediate refresh to get new currentSong (don't wait for poll)
-      // This ensures autoplay works immediately
       if (latestRoom.id) {
         await refreshState(latestRoom.id);
       }
@@ -634,7 +699,6 @@ function TVModePageContent() {
       console.error('[tv] Failed to advance playback:', err);
       setError('Failed to advance to next song');
     } finally {
-      // Reset flag after a short delay to allow for state updates
       setTimeout(() => {
         isAdvancingRef.current = false;
       }, 500);
@@ -671,7 +735,8 @@ function TVModePageContent() {
 
     // Preserve current volume before reload (important for iOS)
     const currentVolume = video.volume;
-    const wasMuted = video.muted;
+    // Secondary TVs must stay muted (HTML5 path)
+    const wasMuted = !isPrimaryTVRef.current;
 
     // Update tracked URL and queue item ID, then reload
     console.log('[tv] set video src:', mediaUrl, 'for queue item:', queueItemId);
@@ -724,8 +789,9 @@ function TVModePageContent() {
           } else {
             setError(`Failed to play video: ${err.message}`);
             // On playback error, skip to next song
-            if (room) {
-              api.advancePlayback(room.id).catch(console.error);
+            if (room && isPrimaryTVRef.current) {
+              const id = typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null;
+              api.advancePlayback(room.id, id ? { tvId: id } : {}).catch(console.error);
             }
           }
         }).finally(() => {
@@ -773,13 +839,12 @@ function TVModePageContent() {
       console.error('[tv] Video error:', e);
       setError('Video playback error - skipping to next song');
       
-      // On error, advance to next song (treat as skip)
       const latestRoom = roomRef.current;
-      if (latestRoom) {
+      if (latestRoom && isPrimaryTVRef.current) {
         try {
-          await api.advancePlayback(latestRoom.id);
+          const id = typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null;
+          await api.advancePlayback(latestRoom.id, id ? { tvId: id } : {});
           console.log('[tv] /advance succeeded after error');
-          // UI does NOTHING - waits for next poll (≤3s)
         } catch (err) {
           console.error('[tv] Failed to advance after error:', err);
         }
@@ -790,6 +855,11 @@ function TVModePageContent() {
       const currentVideo = videoRef.current;
       if (currentVideo) {
         setDuration(currentVideo.duration);
+        const offset = seekOffsetRef.current;
+        if (offset > 2 && currentVideo.duration && offset < currentVideo.duration - 1) {
+          currentVideo.currentTime = offset;
+          console.log('[tv] HTML5 seeked to', offset, 's for multi-TV sync');
+        }
       }
     };
 
@@ -925,43 +995,12 @@ function TVModePageContent() {
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden' }}>
       {/* Video Container - Full screen */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' }}>
-        {/* v4.4: Mid-song connection message */}
-        {joinedMidSong && currentSong && (
-          <div style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            color: 'white',
-            padding: '2rem',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '5rem', marginBottom: '2rem', animation: 'pulse 2s ease-in-out infinite' }}>
-              ⏸️
-            </div>
-            <h1 style={{ fontSize: '3rem', marginBottom: '1rem', fontWeight: 'bold' }}>
-              Display Connected
-            </h1>
-            <p style={{ fontSize: '1.5rem', opacity: 0.9, maxWidth: '800px', lineHeight: '1.6' }}>
-              Video will start playing when the next song begins
-            </p>
-            <div style={{ marginTop: '3rem', padding: '1.5rem 2rem', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '12px', fontSize: '1.2rem' }}>
-              <strong>Current song:</strong> {currentSong.song?.title || 'Unknown'}
-              {currentSong.song?.artist && <div style={{ marginTop: '0.5rem', opacity: 0.8 }}>{currentSong.song.artist}</div>}
-            </div>
-          </div>
-        )}
-        
         {/* YouTube Player (v4.0 Commercial Mode) */}
-        {!joinedMidSong && isYouTubeSong && currentSong?.youtube_url && (
+        {isYouTubeSong && currentSong?.youtube_url && (
           <YouTubePlayer
             key={currentSong.id}
             videoUrl={currentSong.youtube_url}
             onReady={() => {
-              // Set playing queue item ID so handleEnded knows which song is playing
               playingQueueItemIdRef.current = currentSong.id;
               console.log('[TV] YouTube player ready, tracking queue item:', currentSong.id);
             }}
@@ -976,21 +1015,21 @@ function TVModePageContent() {
             }}
             autoPlay={true}
             muted={!isPrimaryTV}
+            startAtSeconds={seekOffsetSeconds}
             width="100%"
             height="100%"
           />
         )}
         
         {/* HTML5 Video Player (v3.5 Database Mode) */}
-        {!joinedMidSong && !isYouTubeSong && (
+        {!isYouTubeSong && (
           <video
             key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
             ref={videoRef}
             autoPlay
             playsInline
-            // onEnded is handled by both addEventListener AND onEnded prop for reliability
+            muted={!isPrimaryTV}
             onEnded={handleEnded}
-            // onTimeUpdate as prop for reliability (like fullscreen)
             onTimeUpdate={handleTimeUpdate}
             style={{
               width: '100%',
@@ -1491,7 +1530,11 @@ function TVModePageContent() {
           onClick={async () => {
             if (room) {
               try {
-                await api.advancePlayback(room.id);
+                if (!isPrimaryTVRef.current) {
+                  setError('Only primary TV can start playback');
+                  return;
+                }
+                await api.advancePlayback(room.id, getTvAdvanceOpts());
                 console.log('[tv] Manual start triggered');
               } catch (err) {
                 console.error('[tv] Failed to start playback:', err);
