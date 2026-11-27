@@ -109,12 +109,15 @@ function parseSelect(selectStr: string): { columns: string[] | '*'; nests: NestS
       continue;
     }
     if (part === '*') {
-      return { columns: '*', nests };
+      // Keep scanning — `*, nest(...)` must still collect nests (state user_name bug)
+      continue;
     }
     topCols.push(part.replace(/\s+/g, ''));
   }
 
-  return { columns: topCols.length ? topCols : '*', nests };
+  // If `*` was present (or no explicit cols), select all parent columns + nests
+  const hadStar = parts.some((p) => p === '*');
+  return { columns: hadStar || !topCols.length ? '*' : topCols, nests };
 }
 
 function guessFk(table: string): string {
@@ -197,7 +200,12 @@ class FilterBuilder {
     },
     private headOnly = false,
     private wantCount = false,
-    private mutating: null | { kind: 'insert'; row: any | any[] } | { kind: 'update'; row: any } | { kind: 'delete' } = null,
+    private mutating:
+      | null
+      | { kind: 'insert'; row: any | any[] }
+      | { kind: 'upsert'; row: any | any[]; onConflict: string }
+      | { kind: 'update'; row: any }
+      | { kind: 'delete' } = null,
     private returnRows = false
   ) {}
 
@@ -211,6 +219,19 @@ class FilterBuilder {
 
   insert(row: any | any[]) {
     this.mutating = { kind: 'insert', row };
+    return this;
+  }
+
+  /**
+   * Supabase-compatible upsert → INSERT ... ON CONFLICT DO UPDATE.
+   * `onConflict` is a comma-separated column list (e.g. "user_id").
+   */
+  upsert(row: any | any[], opts?: { onConflict?: string }) {
+    this.mutating = {
+      kind: 'upsert',
+      row,
+      onConflict: opts?.onConflict || 'id',
+    };
     return this;
   }
 
@@ -379,7 +400,7 @@ class FilterBuilder {
 
   private async execute(mode: 'many' | 'single' | 'maybeSingle') {
     try {
-      if (this.mutating?.kind === 'insert') {
+      if (this.mutating?.kind === 'insert' || this.mutating?.kind === 'upsert') {
         const rows = Array.isArray(this.mutating.row)
           ? this.mutating.row
           : [this.mutating.row];
@@ -397,9 +418,33 @@ class FilterBuilder {
           }
           valueGroups.push(`(${placeholders.join(',')})`);
         }
-        const sql = `INSERT INTO ${quoteIdent(this.table)} (${keys
+
+        let sql = `INSERT INTO ${quoteIdent(this.table)} (${keys
           .map(quoteIdent)
-          .join(',')}) VALUES ${valueGroups.join(',')} RETURNING *`;
+          .join(',')}) VALUES ${valueGroups.join(',')}`;
+
+        if (this.mutating.kind === 'upsert') {
+          const conflictCols = this.mutating.onConflict
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean);
+          if (!conflictCols.length) {
+            throw new Error('upsert requires onConflict columns');
+          }
+          const conflictSet = new Set(conflictCols);
+          const updateCols = keys.filter((k) => !conflictSet.has(k));
+          const conflictSql = conflictCols.map(quoteIdent).join(', ');
+          if (updateCols.length) {
+            const setSql = updateCols
+              .map((k) => `${quoteIdent(k)} = EXCLUDED.${quoteIdent(k)}`)
+              .join(', ');
+            sql += ` ON CONFLICT (${conflictSql}) DO UPDATE SET ${setSql}`;
+          } else {
+            sql += ` ON CONFLICT (${conflictSql}) DO NOTHING`;
+          }
+        }
+
+        sql += ' RETURNING *';
         const result = await query(sql, allParams);
         await this.maybeNotify(result.rows);
         const data = Array.isArray(this.mutating.row) ? result.rows : result.rows[0];

@@ -81,3 +81,15 @@ export function isMobile(): boolean {
 export function isDesktop(): boolean {
   return !isMobile();
 }
+
+/**
+ * Smart TV / streaming stick browsers (Samsung Tizen, Google TV / Streamer,
+ * webOS, etc.). These have weak JS heaps and choke on high-rate fetch + YT remounts.
+ */
+export function isConstrainedTvBrowser(): boolean {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /SMART-TV|SmartTV|Smart TV|Tizen|WebOS|Web0S|CrKey|GoogleTV|Android TV|BRAVIA|ViziOS|HbbTV|TV Safari|AFT[A-Z0-9]|Fire TV|MiBOX|SHIELD Android TV/i.test(
+    ua
+  );
+}

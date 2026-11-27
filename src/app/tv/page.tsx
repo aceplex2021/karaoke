@@ -12,6 +12,7 @@ import { YouTubePlayer, type YouTubePlayerHandle } from '@/components/YouTubePla
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
 import { connectRoomRealtime, postPlayhead } from '@/lib/realtime-client';
+import { isConstrainedTvBrowser } from '@/lib/utils';
 
 /**
  * Format seconds to MM:SS or HH:MM:SS
@@ -87,6 +88,8 @@ function TVModePageContent() {
   const initialEntryIdRef = useRef<string | null>(null); // v4.4: Track entry ID when TV first connected
   const playbackLockRef = useRef<boolean>(false); // v4.7.1: Prevent concurrent play/pause operations
   const reconnectAttemptsRef = useRef(0); // v4.8.0: Real-time reconnection attempts counter
+  const sseRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastUiTimeUpdateRef = useRef(0);
 
   useEffect(() => {
     isPrimaryTVRef.current = isPrimaryTV;
@@ -95,6 +98,13 @@ function TVModePageContent() {
   useEffect(() => {
     seekOffsetRef.current = seekOffsetSeconds;
   }, [seekOffsetSeconds]);
+
+  // Keep ended-handler ID in sync when reusing YouTube iframe across songs
+  useEffect(() => {
+    if (currentSong?.id) {
+      playingQueueItemIdRef.current = currentSong.id;
+    }
+  }, [currentSong?.id]);
 
   // Keep HTML5 mute in sync when primary/secondary flips mid-song
   useEffect(() => {
@@ -110,9 +120,10 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  const SYNC_INTERVAL_MS = 100;
-  const SYNC_DRIFT_SEC = 0.1; // 100ms target
-  const SEEK_COOLDOWN_MS = 120; // avoid seek thrash
+  // ~200ms on Smart TV (coalesced POSTs) — was 100Hz crash; 750ms made secondary free-run/lead.
+  const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 200 : 100;
+  const SYNC_DRIFT_SEC = 0.12;
+  const SEEK_COOLDOWN_MS = 150;
 
   const readLocalPlayhead = useCallback((): { t: number; paused: boolean } | null => {
     const yt = youtubePlayerRef.current;
@@ -136,9 +147,8 @@ function TVModePageContent() {
     if (!currentId || payload.entryId !== currentId) return;
     if (!Number.isFinite(payload.t) || payload.t < 0) return;
 
-    // Compensate small network delay (capped) so secondary leads slightly toward live primary
-    const ageSec = Math.min(Math.max((Date.now() - payload.wallMs) / 1000, 0), 0.25);
-    const target = payload.paused ? payload.t : payload.t + ageSec;
+    // Follow primary exactly — do NOT add ageSec (that made secondaries lead).
+    const target = payload.t;
 
     const local = readLocalPlayhead();
     if (!local) return;
@@ -184,6 +194,8 @@ function TVModePageContent() {
 
     const tick = window.setInterval(() => {
       if (!isPrimaryTVRef.current) return;
+      // Always post when primary — connected_tv_ids JSONB often isn't a JS array,
+      // so gating on length silenced playhead and secondary free-ran ahead.
       const entryId = currentSongRef.current?.id;
       if (!entryId) return;
       const local = readLocalPlayhead();
@@ -555,27 +567,32 @@ function TVModePageContent() {
         }
       },
       onRoom: () => {
-        console.log('[tv] SSE: room/queue change');
-        refreshState(roomId).then(() => {
-          const currentTvId = localStorage.getItem('tv_id');
-          const primaryId = roomRef.current?.primary_tv_id;
-          if (currentTvId && primaryId) {
-            const isNowPrimary = primaryId === currentTvId;
-            if (isNowPrimary !== isPrimaryTVRef.current) {
-              setIsPrimaryTV(isNowPrimary);
-              console.log(
-                '[tv] Primary TV changed:',
-                isNowPrimary ? 'PRIMARY' : 'SECONDARY',
-                '(TV ID:',
-                currentTvId.slice(0, 8),
-                '...)'
-              );
+        // Debounce NOTIFY storms (advance + queue updates can fire many events)
+        if (sseRefreshTimerRef.current) clearTimeout(sseRefreshTimerRef.current);
+        sseRefreshTimerRef.current = setTimeout(() => {
+          console.log('[tv] SSE: room/queue change (debounced)');
+          refreshState(roomId).then(() => {
+            const currentTvId = localStorage.getItem('tv_id');
+            const primaryId = roomRef.current?.primary_tv_id;
+            if (currentTvId && primaryId) {
+              const isNowPrimary = primaryId === currentTvId;
+              if (isNowPrimary !== isPrimaryTVRef.current) {
+                setIsPrimaryTV(isNowPrimary);
+                console.log(
+                  '[tv] Primary TV changed:',
+                  isNowPrimary ? 'PRIMARY' : 'SECONDARY',
+                  '(TV ID:',
+                  currentTvId.slice(0, 8),
+                  '...)'
+                );
+              }
             }
-          }
-        });
+          });
+        }, 350);
       },
       onPlayhead: (payload) => {
-        if (!payload.entryId) return;
+        // Primary ignores playhead; skip work on the posting device (Samsung primary)
+        if (isPrimaryTVRef.current || !payload.entryId) return;
         applyFollowerPlayhead({
           entryId: payload.entryId,
           t: payload.t,
@@ -596,7 +613,13 @@ function TVModePageContent() {
       },
     });
 
-    sseUnsubRef.current = unsub;
+    sseUnsubRef.current = () => {
+      if (sseRefreshTimerRef.current) {
+        clearTimeout(sseRefreshTimerRef.current);
+        sseRefreshTimerRef.current = null;
+      }
+      unsub();
+    };
   }, [refreshState, applyFollowerPlayhead, startPolling]);
 
   const loadRoom = async (roomId: string) => {
@@ -1091,7 +1114,6 @@ function TVModePageContent() {
         {/* YouTube Player (v4.0 Commercial Mode) */}
         {isYouTubeSong && currentSong?.youtube_url && (
           <YouTubePlayer
-            key={currentSong.id}
             ref={youtubePlayerRef}
             videoUrl={currentSong.youtube_url}
             onReady={() => {
@@ -1108,13 +1130,17 @@ function TVModePageContent() {
             }}
             onTimeUpdate={(current, dur) => {
               if (Number.isFinite(current)) {
-                setCurrentTime(current);
                 playerTimeRef.current = current;
               }
               if (Number.isFinite(dur) && dur > 0) {
-                setDuration(dur);
                 playerDurationRef.current = dur;
               }
+              // Throttle React state updates — full TV tree re-render every 250ms kills Smart TVs
+              const now = Date.now();
+              if (now - lastUiTimeUpdateRef.current < 1000) return;
+              lastUiTimeUpdateRef.current = now;
+              if (Number.isFinite(current)) setCurrentTime(current);
+              if (Number.isFinite(dur) && dur > 0) setDuration(dur);
             }}
             autoPlay={true}
             muted={!isPrimaryTV}

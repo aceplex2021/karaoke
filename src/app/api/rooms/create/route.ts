@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // Mark route as dynamic
 export const dynamic = 'force-dynamic';
 import { supabaseAdmin } from '@/server/lib/supabase';
+import { requireKaraSession } from '@/server/lib/session';
 import type { CreateRoomRequest, Room, User } from '@/shared/types';
 
 /**
@@ -39,12 +40,20 @@ async function generateUniqueRoomCode(): Promise<string> {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as CreateRoomRequest;
-    const { room_name, host_fingerprint, host_display_name, queue_mode, approval_mode } = body;
-
-    if (!room_name || !host_fingerprint) {
+    const { user: sessionUser, error: authError } = await requireKaraSession();
+    if (!sessionUser) {
       return NextResponse.json(
-        { error: 'room_name and host_fingerprint are required' },
+        { error: authError || 'Sign in with Google required' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json() as CreateRoomRequest;
+    const { room_name, host_display_name, queue_mode, approval_mode } = body;
+
+    if (!room_name) {
+      return NextResponse.json(
+        { error: 'room_name is required' },
         { status: 400 }
       );
     }
@@ -61,35 +70,21 @@ export async function POST(request: NextRequest) {
       ? approval_mode
       : 'auto'; // Default to auto for backward compatibility
 
-    // Get or create user
-    let { data: user } = await supabaseAdmin
+    let user = sessionUser;
+    await supabaseAdmin
+      .from('kara_users')
+      .update({
+        last_seen_at: new Date().toISOString(),
+        display_name: host_display_name || user.display_name || 'Host',
+      })
+      .eq('id', user.id);
+
+    const { data: refreshed } = await supabaseAdmin
       .from('kara_users')
       .select('*')
-      .eq('fingerprint', host_fingerprint)
+      .eq('id', user.id)
       .single();
-
-    if (!user) {
-      const { data: newUser, error: userError } = await supabaseAdmin
-        .from('kara_users')
-        .insert({
-          fingerprint: host_fingerprint,
-          display_name: host_display_name || 'Host',
-        })
-        .select()
-        .single();
-
-      if (userError) {
-        throw new Error(`Failed to create user: ${userError.message}`);
-      }
-
-      user = newUser;
-    } else {
-      // Update last seen
-      await supabaseAdmin
-        .from('kara_users')
-        .update({ last_seen_at: new Date().toISOString() })
-        .eq('id', user.id);
-    }
+    if (refreshed) user = refreshed;
 
     // Generate unique room code
     const roomCode = await generateUniqueRoomCode();

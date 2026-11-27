@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { getOrCreateFingerprint, isAndroid, isIOS, isDesktop, isIPad } from '@/lib/utils';
+import { useSession } from 'next-auth/react';
+import { isAndroid, isIOS, isDesktop, isIPad } from '@/lib/utils';
 import { connectRoomRealtime } from '@/lib/realtime-client';
 import type { Room, User, Song, QueueItem, SongGroupResult, GroupVersion, RoomState, VersionSearchResult, VersionSearchResponse } from '@/shared/types';
 import { useToast } from '@/components/Toast';
@@ -543,6 +544,7 @@ function VersionSelectorModal({
 export default function RoomPage() {
   const params = useParams();
   const code = params.code as string;
+  const { data: session, status: authStatus } = useSession();
 
   const [room, setRoom] = useState<Room | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -793,11 +795,8 @@ export default function RoomPage() {
 
   const joinRoom = useCallback(async (displayName: string) => {
     try {
-      const fingerprint = getOrCreateFingerprint();
-      
       const { room: roomData, user: userData } = await api.joinRoom({
         room_code: code.toUpperCase(),
-        user_fingerprint: fingerprint,
         display_name: displayName,
       });
 
@@ -878,6 +877,7 @@ export default function RoomPage() {
 
   // Check if user is host and auto-join, otherwise show name input
   useEffect(() => {
+    if (authStatus === 'loading') return;
     // Fix: Prevent duplicate processing (React 18 Strict Mode calls useEffect twice)
     if (hasCheckedNameRef.current) {
       console.log('[Room] Already checked name, skipping');
@@ -897,29 +897,12 @@ export default function RoomPage() {
         // Check if user is already in THIS specific room
         const alreadyInThisRoom = storedRoomCode?.toUpperCase() === code.toUpperCase();
         
-        // Option B: If no name in localStorage, check database (future-proof for v5.0 auth)
-        // COST OPTIMIZATION: Use client-side Supabase directly (no serverless function invocation)
-        if (!storedName) {
-          try {
-            const fingerprint = getOrCreateFingerprint();
-            console.log('[Room] No name in localStorage, checking database for fingerprint:', fingerprint);
-            
-            const res = await fetch(
-              `/api/users/by-fingerprint?fingerprint=${encodeURIComponent(fingerprint)}`,
-              { cache: 'no-store' }
-            );
-            if (res.ok) {
-              const body = await res.json();
-              const name = body?.user?.display_name;
-              if (name) {
-                storedName = name as string;
-                localStorage.setItem('user_display_name', storedName);
-                console.log('[Room] Found name in database:', storedName);
-              }
-            }
-          } catch (err) {
-            console.warn('[Room] Failed to check database for user name:', err);
-            // Continue to show modal if DB check fails
+        // Prefer Google session display name when localStorage is empty
+        if (!storedName && session?.user?.name) {
+          storedName = session.user.name;
+          localStorage.setItem('user_display_name', storedName);
+          if (session.karaUserId) {
+            localStorage.setItem('user_id', session.karaUserId);
           }
         }
         
@@ -964,7 +947,7 @@ export default function RoomPage() {
       // v4.8.0: Reset reconnect attempts
       reconnectAttemptsRef.current = 0;
     };
-  }, [code, joinRoom]);
+  }, [code, joinRoom, session, authStatus]);
 
   // Fetch favorites
   const fetchFavorites = useCallback(async () => {

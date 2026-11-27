@@ -119,6 +119,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const mutedRef = useRef(muted);
   const startAtRef = useRef(startAtSeconds);
+  const lastLoadedVideoIdRef = useRef<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -192,7 +193,9 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
     if ((window as any).YT && (window as any).YT.Player) {
       console.log('[YouTubePlayer] API already loaded');
       initPlayer();
-      return;
+      return () => {
+        teardownPlayer();
+      };
     }
 
     // Load API script
@@ -209,18 +212,41 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
     };
 
     return () => {
-      // Cleanup
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      teardownPlayer();
     };
   }, []);
 
-  // Reinitialize player when video changes
+  const teardownPlayer = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    const player = playerRef.current;
+    playerRef.current = null;
+    if (player && typeof player.destroy === 'function') {
+      try {
+        player.destroy();
+      } catch (e) {
+        console.warn('[YouTubePlayer] destroy failed', e);
+      }
+    }
+  };
+
+  // Reuse the same YT.Player across songs (critical for Smart TV memory)
   useEffect(() => {
-    if (isReady && playerRef.current && videoId) {
-      console.log('[YouTubePlayer] Loading new video:', videoId);
+    if (!isReady || !playerRef.current || !videoId) return;
+    if (lastLoadedVideoIdRef.current === videoId) return;
+    lastLoadedVideoIdRef.current = videoId;
+    console.log('[YouTubePlayer] Loading new video:', videoId);
+    setError(null);
+    try {
       playerRef.current.loadVideoById(videoId);
+      const seekTo = startAtRef.current;
+      if (seekTo > 2 && typeof playerRef.current.seekTo === 'function') {
+        playerRef.current.seekTo(seekTo, true);
+      }
+    } catch (e) {
+      console.warn('[YouTubePlayer] loadVideoById failed', e);
     }
   }, [videoId, isReady]);
 
@@ -428,6 +454,9 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
     if (event?.target) {
       playerRef.current = event.target;
     }
+    if (videoId) {
+      lastLoadedVideoIdRef.current = videoId;
+    }
     
     // Android: Access iframe after creation and set referrer policy
     if (isAndroid() && containerRef.current) {
@@ -513,6 +542,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
+    // 500ms is enough for UI; 250ms × setState was too heavy on Smart TVs
     intervalRef.current = setInterval(() => {
       if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
         const currentTime = playerRef.current.getCurrentTime();
@@ -526,7 +556,7 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
           cb(currentTime, duration);
         }
       }
-    }, 250);
+    }, 500);
   };
 
   const handleStateChange = (event: any) => {
@@ -574,48 +604,8 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
     }
   };
 
-  // Show error message
-  if (error) {
-    return (
-      <div style={{
-        width,
-        height,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#000',
-        color: '#fff',
-        flexDirection: 'column',
-        padding: '2rem',
-        textAlign: 'center',
-      }}>
-        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
-        <h3 style={{ marginBottom: '0.5rem' }}>Playback Error</h3>
-        <p style={{ color: '#ccc' }}>{error}</p>
-        <p style={{ color: '#999', fontSize: '0.9rem', marginTop: '1rem' }}>
-          Skipping to next video...
-        </p>
-      </div>
-    );
-  }
-
-  // Show loading state
-  if (!videoId) {
-    return (
-      <div style={{
-        width,
-        height,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#000',
-        color: '#fff',
-      }}>
-        <p>Invalid video URL</p>
-      </div>
-    );
-  }
-
+  // Keep the YT container mounted always — swapping it out for error UI orphaned
+  // iframes on Smart TVs and crashed after the first song.
   return (
     <div 
       style={{ 
@@ -625,6 +615,29 @@ export const YouTubePlayer = forwardRef<YouTubePlayerHandle, YouTubePlayerProps>
         background: '#000',
       }}
     >
+      {!videoId && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', color: '#fff', zIndex: 2,
+        }}>
+          <p>Invalid video URL</p>
+        </div>
+      )}
+      {error && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.85)', color: '#fff',
+          flexDirection: 'column', padding: '2rem', textAlign: 'center', zIndex: 2,
+        }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
+          <h3 style={{ marginBottom: '0.5rem' }}>Playback Error</h3>
+          <p style={{ color: '#ccc' }}>{error}</p>
+          <p style={{ color: '#999', fontSize: '0.9rem', marginTop: '1rem' }}>
+            Skipping to next video...
+          </p>
+        </div>
+      )}
       <div 
         ref={containerRef}
         style={{ 

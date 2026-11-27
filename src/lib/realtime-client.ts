@@ -26,8 +26,10 @@ export function connectRoomRealtime(roomId: string, handlers: RealtimeHandlers) 
     }
   });
   es.addEventListener('playhead', (ev) => {
+    // Skip parse work when caller does not care (e.g. primary TV)
+    if (!handlers.onPlayhead) return;
     try {
-      handlers.onPlayhead?.(JSON.parse((ev as MessageEvent).data));
+      handlers.onPlayhead(JSON.parse((ev as MessageEvent).data));
     } catch {
       /* ignore */
     }
@@ -39,6 +41,16 @@ export function connectRoomRealtime(roomId: string, handlers: RealtimeHandlers) 
   };
 }
 
+/** Drop overlapping playhead POSTs — TV browsers pile up promises at 10Hz. */
+let playheadInFlight = false;
+let playheadQueued: {
+  roomId: string;
+  entryId: string;
+  t: number;
+  paused: boolean;
+  wallMs?: number;
+} | null = null;
+
 export async function postPlayhead(payload: {
   roomId: string;
   entryId: string;
@@ -46,14 +58,31 @@ export async function postPlayhead(payload: {
   paused: boolean;
   wallMs?: number;
 }) {
+  if (playheadInFlight) {
+    playheadQueued = payload;
+    return;
+  }
+  playheadInFlight = true;
   try {
-    await fetch('/api/realtime/playhead', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      cache: 'no-store',
-    });
-  } catch {
-    /* best-effort */
+    let next: typeof payload | null = payload;
+    while (next) {
+      const body = next;
+      next = null;
+      try {
+        await fetch('/api/realtime/playhead', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          cache: 'no-store',
+          keepalive: true,
+        });
+      } catch {
+        /* best-effort */
+      }
+      next = playheadQueued;
+      playheadQueued = null;
+    }
+  } finally {
+    playheadInFlight = false;
   }
 }

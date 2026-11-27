@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { getOrCreateFingerprint } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { CommercialOnly, PrivateOnly } from '@/components/FeatureToggle';
 
@@ -296,10 +295,8 @@ function V3LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
     setError('');
 
     try {
-      const fingerprint = getOrCreateFingerprint();
-      const { room } = await api.createRoom({
+      const { room, user } = await api.createRoom({
         room_name: roomName,
-        host_fingerprint: fingerprint,
         host_display_name: displayName || 'Host',
         queue_mode: queueMode,
       });
@@ -307,7 +304,7 @@ function V3LandingPage({ router }: { router: ReturnType<typeof useRouter> }) {
       // Store room ID in localStorage for persistence (client-side only)
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem('tv_room_id', room.id);
-        window.localStorage.setItem('tv_user_id', room.host_id || '');
+        window.localStorage.setItem('tv_user_id', user?.id || room.host_id || '');
       }
 
       router.push(`/tv?roomId=${room.id}`);

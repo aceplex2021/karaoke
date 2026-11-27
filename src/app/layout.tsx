@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { PreviewProvider } from '@/contexts/PreviewContext';
 import { PWASetup } from '@/components/PWASetup';
+import { AuthSessionProvider } from '@/components/AuthSessionProvider';
+import { AuthUserSync } from '@/components/AuthUserSync';
 
 export const metadata: Metadata = {
   title: 'Kara - Karaoke Queue Manager',
@@ -59,12 +61,13 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body>
-        <PreviewProvider>
-          {children}
-        </PreviewProvider>
-        
-        {/* PWA Setup (Service Worker Registration) */}
-        <PWASetup />
+        <AuthSessionProvider>
+          <AuthUserSync />
+          <PreviewProvider>
+            {children}
+          </PreviewProvider>
+          <PWASetup />
+        </AuthSessionProvider>
       </body>
     </html>
   );

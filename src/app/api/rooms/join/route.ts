@@ -3,19 +3,29 @@ import { NextRequest, NextResponse } from 'next/server';
 // Mark route as dynamic
 export const dynamic = 'force-dynamic';
 import { supabaseAdmin } from '@/server/lib/supabase';
+import { requireKaraSession } from '@/server/lib/session';
 import type { JoinRoomRequest, Room, User } from '@/shared/types';
 
 /**
  * Join room (v3.5 + v4.0 approval mode support)
+ * Requires Google session — identity from kara_users.google_sub.
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as JoinRoomRequest;
-    const { room_code, user_fingerprint, display_name } = body;
-
-    if (!room_code || !user_fingerprint) {
+    const { user: sessionUser, error: authError } = await requireKaraSession();
+    if (!sessionUser) {
       return NextResponse.json(
-        { error: 'room_code and user_fingerprint are required' },
+        { error: authError || 'Sign in with Google required' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json() as JoinRoomRequest;
+    const { room_code, display_name } = body;
+
+    if (!room_code) {
+      return NextResponse.json(
+        { error: 'room_code is required' },
         { status: 400 }
       );
     }
@@ -49,55 +59,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get or create user (handle race condition for duplicate fingerprint)
-    let user: any;
-    const { data: existingUser } = await supabaseAdmin
+    let user = sessionUser;
+    await supabaseAdmin
+      .from('kara_users')
+      .update({
+        last_seen_at: new Date().toISOString(),
+        display_name: display_name || user.display_name,
+      })
+      .eq('id', user.id);
+
+    const { data: refreshed } = await supabaseAdmin
       .from('kara_users')
       .select('*')
-      .eq('fingerprint', user_fingerprint)
+      .eq('id', user.id)
       .single();
-
-    if (existingUser) {
-      user = existingUser;
-      // Update last seen and display name if provided
-      await supabaseAdmin
-        .from('kara_users')
-        .update({
-          last_seen_at: new Date().toISOString(),
-          display_name: display_name || user.display_name,
-        })
-        .eq('id', user.id);
-    } else {
-      // Try to create user, but handle duplicate key error (race condition)
-      const { data: newUser, error: insertError } = await supabaseAdmin
-        .from('kara_users')
-        .insert({
-          fingerprint: user_fingerprint,
-          display_name: display_name || 'Guest',
-        })
-        .select()
-        .single();
-
-      if (insertError) {
-        // If duplicate key error, fetch the existing user
-        if (insertError.code === '23505' || insertError.message.includes('duplicate')) {
-          const { data: retryUser } = await supabaseAdmin
-            .from('kara_users')
-            .select('*')
-            .eq('fingerprint', user_fingerprint)
-            .single();
-          if (retryUser) {
-            user = retryUser;
-          } else {
-            throw new Error(`Failed to create user: ${insertError.message}`);
-          }
-        } else {
-          throw new Error(`Failed to create user: ${insertError.message}`);
-        }
-      } else {
-        user = newUser;
-      }
-    }
+    if (refreshed) user = refreshed;
 
     // Phase 2.1: Smart cleanup - Remove only stale participations (>24h inactive)
     // This prevents users from being stuck in multiple rooms while allowing

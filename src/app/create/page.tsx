@@ -10,20 +10,27 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getOrCreateFingerprint } from '@/lib/utils';
+import { useSession } from 'next-auth/react';
 import { api } from '@/lib/api';
 import { CommercialOnly } from '@/components/FeatureToggle';
 
 export default function CreateRoomPage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [roomName, setRoomName] = useState('');
   const [hostName, setHostName] = useState('');
   const [queueMode, setQueueMode] = useState<'round_robin' | 'fifo'>('round_robin');
   const [approvalMode, setApprovalMode] = useState<'auto' | 'approval'>('auto');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (session?.user?.name && !hostName) {
+      setHostName(session.user.name);
+    }
+  }, [session, hostName]);
 
   const handleCreateRoom = async () => {
     if (!roomName.trim()) {
@@ -40,12 +47,9 @@ export default function CreateRoomPage() {
     setError('');
 
     try {
-      const fingerprint = getOrCreateFingerprint();
-      
-      // Create room via API
-      const { room } = await api.createRoom({
+      // Create room via API (Google session cookie identifies host)
+      const { room, user } = await api.createRoom({
         room_name: roomName,
-        host_fingerprint: fingerprint,
         host_display_name: hostName,
         queue_mode: queueMode,
         approval_mode: approvalMode,
@@ -57,7 +61,8 @@ export default function CreateRoomPage() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('current_room_id', room.id);
         localStorage.setItem('current_room_code', room.room_code);
-        localStorage.setItem('user_id', room.host_id || fingerprint);
+        localStorage.setItem('user_id', user?.id || session?.karaUserId || room.host_id || '');
+        localStorage.setItem('user_display_name', hostName);
         localStorage.setItem('user_role', 'host');
       }
 

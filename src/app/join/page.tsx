@@ -8,16 +8,24 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { api } from '@/lib/api';
 
 export default function JoinRoomPage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [roomCode, setRoomCode] = useState('');
   const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [checkingRoom, setCheckingRoom] = useState(true); // v4.5.1: Check for existing room
   const [lastRoomCode, setLastRoomCode] = useState<string | null>(null); // Phase 2: Show last room option
+
+  useEffect(() => {
+    if (session?.user?.name && !userName) {
+      setUserName(session.user.name);
+    }
+  }, [session, userName]);
 
   // Phase 2: Check for last room but show option instead of auto-redirect
   useEffect(() => {
