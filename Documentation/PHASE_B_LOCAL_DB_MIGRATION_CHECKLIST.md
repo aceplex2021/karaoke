@@ -101,7 +101,7 @@ Dump/check:
 - [x] `pg_hba`: allow `kara_app` from kara2 subnet (`10.0.19.0/24` and/or `10.0.29.0/24`) via VIP
 - [x] Apps connect only via **HAProxy VIP** `10.0.29.95:5432` (not raw primary IP)
 - [x] Connectivity test from kara2 LXC: `psql` / Node `pg` smoke query
-- [ ] Add `karaoke` to TrueNAS / nightly `pg_dump` job (or dedicated dump script + retention)
+- [x] Add `karaoke` to TrueNAS / nightly `pg_dump` job (or dedicated dump script + retention)
 - [ ] Document restore drill path
 - [x] Optional: separate connection pooler limits so karaoke cannot starve trading (`PG_POOL_MAX`)
 
@@ -185,33 +185,33 @@ Must replace **both**:
 
 | Data | Migrate? |
 |------|----------|
-| Catalog (`kara_versions`, `kara_files`, groups, languages) | [ ] yes |
-| Users / prefs / history | [ ] yes |
-| Active rooms / live queue | [ ] optional — often cold cut (empty rooms) |
-| Completed queue rows | [ ] optional / truncate |
+| Catalog (`kara_versions`, `kara_files`, groups, languages) | [x] yes |
+| Users / prefs / history | [x] yes |
+| Active rooms / live queue | [x] optional — cold cut (rooms deactivated; queue/participants skipped) |
+| Completed queue rows | [x] optional / truncate |
 
 ### 7.2 Steps
 
-- [ ] Maintenance window announced
-- [ ] Final `pg_dump` / logical copy from Supabase (or table sync tool)
-- [ ] Restore into local `karaoke`
-- [ ] Row-count + spot-check checksums (sample IDs)
-- [ ] Recompute / verify `sort_key` sanity on pending queues if any live rooms migrated
+- [x] Maintenance window announced
+- [x] Final `pg_dump` / logical copy from Supabase (or table sync tool)
+- [x] Restore into local `karaoke`
+- [x] Row-count + spot-check checksums (sample IDs)
+- [x] Recompute / verify `sort_key` sanity on pending queues if any live rooms migrated
 - [ ] Controller can upsert a test song end-to-end on local DB
 
 ### 7.3 Dual-run (recommended)
 
-- [ ] Local DB writable; Supabase set read-only or app writes only local
+- [x] Local DB writable; Supabase set read-only or app writes only local
 - [ ] Keep Supabase dump for rollback for N days: _____
-- [ ] Rollback procedure written (point `DATABASE_URL` back / redeploy previous image)
+- [x] Rollback procedure written (point `DATABASE_URL` back / redeploy previous image)
 
 ---
 
 ## 8. Cutover (kara2)
 
-- [ ] Checkpoint / git tag before cutover deploy
-- [ ] Deploy build with `DATABASE_URL` + new Realtime
-- [ ] Flip DNS/tunnel unchanged (`kara2.4voice.ai`) — only backend env changes
+- [x] Checkpoint / git tag before cutover deploy
+- [x] Deploy build with `DATABASE_URL` + new Realtime
+- [x] Flip DNS/tunnel unchanged (`kara2.4voice.ai`) — only backend env changes
 - [ ] Smoke on production URL (see §9)
 - [ ] Monitor logs 24–48h (advance races, sync channel, cron)
 - [ ] Remove Supabase keys from kara2 env
@@ -245,7 +245,7 @@ Must replace **both**:
 
 ### 9.3 Ops
 
-- [ ] Nightly backup includes `karaoke`
+- [x] Nightly backup includes `karaoke`
 - [ ] Restore tested once (even to scratch DB)
 - [ ] Runbook updated: connection VIP, role, cron, rollback
 
