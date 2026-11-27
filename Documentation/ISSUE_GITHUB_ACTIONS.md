@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Issue ID** | `INFRA-GHA-KARA2-001` |
-| **Status** | ADDED — runner setup still required for deploy |
+| **Status** | DONE — runner `karaoke-kara2` online; deploy verified success |
 | **Created** | 2026-11-27 |
 
 ## Problem

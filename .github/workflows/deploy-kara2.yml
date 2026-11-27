@@ -28,23 +28,22 @@ jobs:
           mkdir -p "$REPO_DIR"
           cd "$REPO_DIR"
 
+          # Never persist PAT in git remote URL — use header auth for fetch only
+          AUTH_HEADER=()
+          if [ -n "${GH_PAT:-}" ]; then
+            AUTH_HEADER=(-c "http.https://github.com/.extraheader=AUTHORIZATION: bearer ${GH_PAT}")
+          fi
+
           if [ ! -d .git ]; then
             echo "Initializing git clone in $REPO_DIR"
-            if [ -n "${GH_PAT:-}" ]; then
-              git clone "https://x-access-token:${GH_PAT}@github.com/aceplex2021/karaoke.git" /tmp/kara2-clone
-            else
-              git clone "https://github.com/aceplex2021/karaoke.git" /tmp/kara2-clone
-            fi
-            # Keep existing secrets/config if present
+            git "${AUTH_HEADER[@]}" clone https://github.com/aceplex2021/karaoke.git /tmp/kara2-clone
             cp -a /tmp/kara2-clone/. "$REPO_DIR/"
             rm -rf /tmp/kara2-clone
           fi
 
-          if [ -n "${GH_PAT:-}" ]; then
-            git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/aceplex2021/karaoke.git"
-          fi
-
-          git fetch origin main
+          # Normalize remote to token-free URL
+          git remote set-url origin https://github.com/aceplex2021/karaoke.git
+          git "${AUTH_HEADER[@]}" fetch origin main
           git reset --hard origin/main
 
           if [ ! -f .env ]; then

@@ -27,6 +27,7 @@ jobs:
       - name: Typecheck
         run: npm run type-check
 
+      # Full next build needs Supabase secrets. Skip cleanly until they are set in repo Settings.
       - name: Build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -34,4 +35,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_COMMERCIAL_MODE: ${{ vars.NEXT_PUBLIC_COMMERCIAL_MODE || 'true' }}
           MEDIA_SERVER_URL: ${{ vars.MEDIA_SERVER_URL || 'https://media.4voice.ai' }}
-        run: npm run build
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Skipping next build — add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY as repo secrets."
+            exit 0
+          fi
+          npm run build
