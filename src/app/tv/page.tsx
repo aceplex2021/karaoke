@@ -1453,12 +1453,12 @@ function TVModePageContent() {
       )}
       </div>
 
-      {/* QR Code - middle-right, room code above */}
+      {/* QR Code - upper-middle right (halfway between top and vertical center) */}
       {room && (
         <div
           style={{
             position: 'absolute',
-            top: '50%',
+            top: '25%',
             right: '1rem',
             transform: 'translateY(-50%)',
             zIndex: 600,
