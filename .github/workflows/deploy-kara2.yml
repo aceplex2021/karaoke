@@ -64,4 +64,20 @@ jobs:
 
           docker compose up -d --build --remove-orphans --force-recreate
           docker compose ps
+
+          # Apply idempotent playhead column (multi-TV sync across workers)
+          if [ -f .env ] && [ -f database/phase_b_tv_playhead.sql ]; then
+            set -a
+            # shellcheck disable=SC1091
+            . ./.env
+            set +a
+            if [ -n "${DATABASE_URL:-}" ]; then
+              docker run --rm --network host \
+                -v "$REPO_DIR/database/phase_b_tv_playhead.sql:/sql.sql:ro" \
+                postgres:16-alpine \
+                psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /sql.sql \
+                || echo "::warning::tv_playhead migration failed — apply database/phase_b_tv_playhead.sql manually"
+            fi
+          fi
+
           echo "Deployed $(git rev-parse --short HEAD) to kara2"

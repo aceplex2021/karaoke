@@ -122,10 +122,11 @@ function TVModePageContent() {
     followerSyncedRef.current = followerSynced;
   }, [followerSynced]);
 
-  const markFollowerUnsynced = useCallback(() => {
+  const markFollowerUnsynced = useCallback((reason: string) => {
     followerSyncedRef.current = false;
     setFollowerSynced(false);
     lastFollowerSeekAtRef.current = 0;
+    console.log('[tv] Secondary unsynced:', reason);
     const yt = youtubePlayerRef.current;
     if (yt) yt.pause();
     const video = videoRef.current;
@@ -139,13 +140,16 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Primary = clock. Secondary = paused until playhead, then trail slightly behind.
-  const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 250 : 150;
-  const FOLLOWER_POLL_MS = 500;
-  const SYNC_DRIFT_SEC = 1.25;
-  const SEEK_COOLDOWN_MS = 2000;
-  const PLAYHEAD_STALE_MS = 2500;
-  const FOLLOW_LAG_SEC = 0.35; // secondary intentionally a bit behind main
+  // Target ≤100ms: no intentional lag; correct often; poll + DB-backed playhead
+  const SYNC_INTERVAL_MS = 100;
+  const FOLLOWER_POLL_MS = 100;
+  const SYNC_DRIFT_SEC = 0.1;
+  const SEEK_COOLDOWN_MS = 150;
+  const PLAYHEAD_STALE_MS = 3000;
+  const VISIBILITY_UNSYNC_MS = 2000;
+
+  const hiddenAtRef = useRef<number | null>(null);
+  const pollDiagAtRef = useRef(0);
 
   const readLocalPlayhead = useCallback((): {
     t: number;
@@ -168,6 +172,21 @@ function TVModePageContent() {
     return null;
   }, []);
 
+  const publishPrimaryPlayhead = useCallback(() => {
+    if (!isPrimaryTVRef.current) return;
+    const roomId = roomIdRef.current || roomRef.current?.id;
+    const entryId = currentSongRef.current?.id;
+    if (!roomId || !entryId) return;
+    const local = readLocalPlayhead();
+    postPlayhead({
+      roomId,
+      entryId,
+      t: local?.t ?? 0,
+      paused: local?.paused ?? false,
+      wallMs: Date.now(),
+    });
+  }, [readLocalPlayhead]);
+
   const applyFollowerPlayhead = useCallback((payload: PlayheadPayload) => {
     if (isPrimaryTVRef.current) return;
     if (!payload.entryId || !Number.isFinite(payload.t) || payload.t < 0) return;
@@ -175,21 +194,45 @@ function TVModePageContent() {
     const now = Date.now();
     const wallMs = typeof payload.wallMs === 'number' ? payload.wallMs : now;
     const ageMs = now - wallMs;
-    if (ageMs > PLAYHEAD_STALE_MS) return;
+    if (ageMs > PLAYHEAD_STALE_MS) {
+      if (now - pollDiagAtRef.current > 5000) {
+        pollDiagAtRef.current = now;
+        console.warn('[tv] Playhead stale', { ageMs, t: payload.t });
+      }
+      return;
+    }
 
     const currentId = currentSongRef.current?.id;
-    if (!currentId || payload.entryId !== currentId) return;
+    const roomEntryId = roomRef.current?.current_entry_id;
+    // While unsynced, accept playhead for room's current entry (song-change race)
+    const entryOk =
+      payload.entryId === currentId ||
+      (!followerSyncedRef.current &&
+        roomEntryId != null &&
+        payload.entryId === roomEntryId);
+    if (!entryOk) {
+      if (now - pollDiagAtRef.current > 5000) {
+        pollDiagAtRef.current = now;
+        console.warn('[tv] Playhead entryId mismatch', {
+          payload: payload.entryId,
+          currentId,
+          roomEntryId,
+        });
+      }
+      return;
+    }
 
     const yt = youtubePlayerRef.current;
     const video = videoRef.current;
     if (!yt && !(video && video.src)) return;
 
     const local = readLocalPlayhead();
-    // Allow first catch-up even while buffering; skip later seeks during buffer
     if (local?.state === 3 && followerSyncedRef.current) return;
 
-    // Trail primary slightly so secondary never leads
-    const target = Math.max(0, payload.t - FOLLOW_LAG_SEC);
+    // Extrapolate packet age so poll delay does not add lag
+    const target = payload.paused
+      ? payload.t
+      : Math.max(0, payload.t + ageMs / 1000);
     const localT = local?.t ?? 0;
     const drift = Math.abs(localT - target);
     const firstCatchUp = !followerSyncedRef.current;
@@ -200,8 +243,9 @@ function TVModePageContent() {
     if (canSeek && (firstCatchUp || drift > SYNC_DRIFT_SEC)) {
       lastFollowerSeekAtRef.current = now;
       console.log('[tv] Follow seek', {
-        from: localT.toFixed(1),
-        to: target.toFixed(1),
+        from: localT.toFixed(2),
+        to: target.toFixed(2),
+        drift: drift.toFixed(2),
         first: firstCatchUp,
       });
       if (yt) yt.seekTo(target);
@@ -214,20 +258,15 @@ function TVModePageContent() {
       }
     }
 
-    // After we have a position, play only if primary is playing
     if (!followerSyncedRef.current) {
       followerSyncedRef.current = true;
       setFollowerSynced(true);
-      console.log('[tv] Secondary synced to primary at', target.toFixed(1), 's');
+      console.log('[tv] Secondary synced at', target.toFixed(2), 's');
     }
 
     if (yt) {
-      const state = local?.state ?? null;
-      if (payload.paused) {
-        if (state !== 2) yt.pause();
-      } else {
-        yt.play();
-      }
+      if (payload.paused) yt.pause();
+      else yt.play();
     } else if (video) {
       if (payload.paused) {
         if (!video.paused) video.pause();
@@ -237,30 +276,27 @@ function TVModePageContent() {
     }
   }, [readLocalPlayhead]);
 
-  // Primary posts; secondary polls hub (SSE playhead often dropped — logs had zero Follow seek)
+  // Primary posts; secondary polls DB-backed playhead
   useEffect(() => {
     const roomId = room?.id;
     if (!roomId) return;
 
     const primaryTick = window.setInterval(() => {
-      if (!isPrimaryTVRef.current) return;
-      const entryId = currentSongRef.current?.id;
-      if (!entryId) return;
-      const local = readLocalPlayhead();
-      if (!local) return;
-      postPlayhead({
-        roomId,
-        entryId,
-        t: local.t,
-        paused: local.paused,
-        wallMs: Date.now(),
-      });
+      publishPrimaryPlayhead();
     }, SYNC_INTERVAL_MS);
 
     const followerTick = window.setInterval(() => {
       if (isPrimaryTVRef.current) return;
       fetchLastPlayhead(roomId).then((p) => {
-        if (isPrimaryTVRef.current || !p?.entryId) return;
+        if (isPrimaryTVRef.current) return;
+        if (!p?.entryId) {
+          const now = Date.now();
+          if (now - pollDiagAtRef.current > 5000) {
+            pollDiagAtRef.current = now;
+            console.warn('[tv] Playhead poll returned null — is primary posting?');
+          }
+          return;
+        }
         applyFollowerPlayhead({
           entryId: p.entryId,
           t: p.t,
@@ -274,15 +310,28 @@ function TVModePageContent() {
       window.clearInterval(primaryTick);
       window.clearInterval(followerTick);
     };
-  }, [room?.id, readLocalPlayhead, applyFollowerPlayhead]);
+  }, [room?.id, publishPrimaryPlayhead, applyFollowerPlayhead]);
 
-  // Leaving the tab / returning: don't resume local position — wait for primary again
+  // Primary: publish immediately on song change so secondary can leave "Syncing…"
+  useEffect(() => {
+    if (!isPrimaryTV || !currentSong?.id || !room?.id) return;
+    publishPrimaryPlayhead();
+  }, [isPrimaryTV, currentSong?.id, room?.id, publishPrimaryPlayhead]);
+
+  // Only unsync after a real hide (≥2s), not every focus flicker
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState !== 'visible') return;
       if (isPrimaryTVRef.current) return;
-      console.log('[tv] Secondary tab visible — pause until primary playhead');
-      markFollowerUnsynced();
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now();
+        return;
+      }
+      const hiddenAt = hiddenAtRef.current;
+      hiddenAtRef.current = null;
+      if (hiddenAt == null) return;
+      const hiddenFor = Date.now() - hiddenAt;
+      if (hiddenFor < VISIBILITY_UNSYNC_MS) return;
+      markFollowerUnsynced(`tab hidden ${Math.round(hiddenFor / 1000)}s`);
     };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
@@ -564,7 +613,7 @@ function TVModePageContent() {
             }
             setQueue(state.queue);
             setUpNext(state.upNext);
-            // New song: secondary pauses until next primary playhead
+            // New song: secondary pauses until primary posts playhead for new entry
             if (nextEntryId !== prevEntryId) {
               setSeekOffsetSeconds(0);
               seekOffsetRef.current = 0;
@@ -572,6 +621,7 @@ function TVModePageContent() {
                 followerSyncedRef.current = false;
                 setFollowerSynced(false);
                 lastFollowerSeekAtRef.current = 0;
+                console.log('[tv] Secondary unsynced: song change');
               }
             }
           }
