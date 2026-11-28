@@ -1,7 +1,7 @@
 # Issue: Sparse multi-TV sync (reduce constant chase)
 
 **Date:** 2026-11-28  
-**Status:** Implemented — awaiting device test  
+**Status:** Fix2 — seed/live lock + primary burst (stale t:0 / ahead on new songs)  
 **Checkpoint:** `checkpoint-known-good-sync-before-sparse-broadcast` @ `3ed02db`
 
 ## 1. Current Behavior

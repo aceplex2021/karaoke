@@ -8,6 +8,7 @@ export type RealtimeHandlers = {
     t: number;
     paused: boolean;
     wallMs: number;
+    seed?: boolean;
   }) => void;
   onError?: (err: Event) => void;
   onReady?: () => void;
@@ -113,6 +114,7 @@ export async function fetchLastPlayhead(roomId: string): Promise<{
   t: number;
   paused: boolean;
   wallMs: number;
+  seed?: boolean;
 } | null> {
   try {
     const res = await fetchWithTimeout(
@@ -129,6 +131,7 @@ export async function fetchLastPlayhead(roomId: string): Promise<{
       t: p.t,
       paused: Boolean(p.paused),
       wallMs: typeof p.wallMs === 'number' ? p.wallMs : Date.now(),
+      seed: p.seed === true ? true : undefined,
     };
   } catch {
     return null;

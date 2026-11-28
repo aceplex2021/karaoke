@@ -8,7 +8,13 @@ export const dynamic = 'force-dynamic';
 /** Clear or seed playhead so secondaries leave Syncing on song change without waiting on Samsung POSTs. */
 async function writeRoomPlayhead(
   roomId: string,
-  payload: { entryId: string; t: number; paused: boolean; wallMs: number } | null
+  payload: {
+    entryId: string;
+    t: number;
+    paused: boolean;
+    wallMs: number;
+    seed?: boolean;
+  } | null
 ) {
   if (!payload) {
     clearPlayhead(roomId);
@@ -43,11 +49,13 @@ async function seedPlayheadForCurrentEntry(roomId: string) {
     await writeRoomPlayhead(roomId, null);
     return;
   }
+  // seed:true — secondary may start, but must re-lock when primary posts live time
   await writeRoomPlayhead(roomId, {
     entryId,
     t: 0,
     paused: false,
     wallMs: Date.now(),
+    seed: true,
   });
 }
 

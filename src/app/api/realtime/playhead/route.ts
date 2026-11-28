@@ -14,6 +14,7 @@ type PlayheadPayload = {
   t: number;
   paused: boolean;
   wallMs: number;
+  seed?: boolean;
 };
 
 let columnEnsured = false;
@@ -148,11 +149,17 @@ export async function GET(request: NextRequest) {
   let out = payload;
   if (out && !out.paused && typeof out.wallMs === 'number' && typeof out.t === 'number') {
     const ageMs = Date.now() - out.wallMs;
-    if (ageMs > 250 && ageMs < 180_000) {
+    // Ancient frozen seed/packet — do not hand secondary a lying t:0
+    if (ageMs >= 180_000) {
+      return NextResponse.json({ ok: true, playhead: null });
+    }
+    if (ageMs > 250) {
       out = {
         ...out,
         t: Math.max(0, out.t + ageMs / 1000),
         wallMs: Date.now(),
+        // Extrapolated seed is still not a live primary lock
+        seed: out.seed === true ? true : undefined,
       };
     }
   }
