@@ -126,6 +126,7 @@ function TVModePageContent() {
     followerSyncedRef.current = false;
     setFollowerSynced(false);
     lastFollowerSeekAtRef.current = 0;
+    lastKnownPlayheadRef.current = null;
     console.log('[tv] Secondary unsynced:', reason);
     const yt = youtubePlayerRef.current;
     if (yt) yt.pause();
@@ -140,19 +141,24 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Primary: prefer YouTube onTimeUpdate (setInterval is throttled on Samsung/streamer).
-  const SYNC_INTERVAL_MS = 2000;
-  const PRIMARY_POST_MIN_MS = 500;
-  const FOLLOWER_POLL_MS = 500;
-  const FOLLOW_TRAIL_SEC = 0.2;
-  const SYNC_DRIFT_SEC = 0.85;
-  const SEEK_COOLDOWN_MS = 2000;
-  const PLAYHEAD_STALE_MS = 12000;
+  // Sparse sync: song-start lock + ~15s broadcast; seek only on >300ms drift / lead.
+  // Primary still posts from onTimeUpdate (Samsung throttles setInterval).
+  const SYNC_INTERVAL_MS = 15000;
+  const PRIMARY_POST_MIN_MS = 15000;
+  const FOLLOWER_POLL_MS = 15000;
+  const DRIFT_CHECK_MS = 3000;
+  const FOLLOW_TRAIL_SEC = 0.05; // ≥50ms behind main
+  const SYNC_DRIFT_SEC = 0.3; // correct only when |error| > 300ms (or ahead of main)
+  const AHEAD_EPS_SEC = 0.02; // treat as ahead of main if within/past this
+  const SEEK_COOLDOWN_MS = 2500;
+  const PLAYHEAD_STALE_MS = 45000; // tolerate 15s broadcast gaps
   const VISIBILITY_UNSYNC_MS = 2000;
 
   const hiddenAtRef = useRef<number | null>(null);
   const pollDiagAtRef = useRef(0);
   const lastPrimaryPostAtRef = useRef(0);
+  /** Last accepted playhead — secondary free-runs against this between broadcasts */
+  const lastKnownPlayheadRef = useRef<PlayheadPayload | null>(null);
   /** Playhead arrived before YouTube/HTML5 player ready — apply on ready */
   const pendingPlayheadRef = useRef<PlayheadPayload | null>(null);
 
@@ -257,22 +263,28 @@ function TVModePageContent() {
     }
 
     pendingPlayheadRef.current = null;
+    lastKnownPlayheadRef.current = payload;
 
     const local = readLocalPlayhead();
     // While buffering after first sync, skip; still allow first catch-up seek
     if (local?.state === 3 && followerSyncedRef.current) return;
 
-    // Trail behind primary — never extrapolate ahead (that caused secondary to lead)
+    // Trail: never lead main. Target = main − 50ms when playing.
+    const mainT = payload.t;
     const target = payload.paused
-      ? payload.t
-      : Math.max(0, payload.t - FOLLOW_TRAIL_SEC);
+      ? mainT
+      : Math.max(0, mainT - FOLLOW_TRAIL_SEC);
     const localT = local?.t ?? 0;
-    const ahead = localT - target;
-    const behind = target - localT;
+    const aheadOfTarget = localT - target;
+    const behindTarget = target - localT;
+    const aheadOfMain = localT - mainT;
     const firstCatchUp = !followerSyncedRef.current;
-    // Wide deadband — micro-seeks buffer YouTube and cause the "hiccup after a few min"
+    // Song-start lock always; later only if ahead of main or |drift vs trail| > 300ms
     const needsSeek =
-      firstCatchUp || ahead > SYNC_DRIFT_SEC || behind > SYNC_DRIFT_SEC;
+      firstCatchUp ||
+      aheadOfMain > -AHEAD_EPS_SEC ||
+      aheadOfTarget > SYNC_DRIFT_SEC ||
+      behindTarget > SYNC_DRIFT_SEC;
     const canSeek =
       needsSeek &&
       (firstCatchUp || now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS);
@@ -282,7 +294,8 @@ function TVModePageContent() {
       console.log('[tv] Follow seek', {
         from: localT.toFixed(2),
         to: target.toFixed(2),
-        ahead: ahead.toFixed(2),
+        main: mainT.toFixed(2),
+        aheadMain: aheadOfMain.toFixed(2),
         first: firstCatchUp,
       });
       if (yt) yt.seekTo(target);
@@ -293,6 +306,13 @@ function TVModePageContent() {
           /* ignore */
         }
       }
+    } else if (now - pollDiagAtRef.current > 20000) {
+      pollDiagAtRef.current = now;
+      console.log('[tv] Free-run OK', {
+        local: localT.toFixed(2),
+        target: target.toFixed(2),
+        main: mainT.toFixed(2),
+      });
     }
 
     if (!followerSyncedRef.current) {
@@ -318,7 +338,7 @@ function TVModePageContent() {
     }
   }, [readLocalPlayhead]);
 
-  // Primary posts; secondary polls DB-backed playhead
+  // Primary ~15s broadcast; secondary rare poll + on-demand when local drift > 300ms
   useEffect(() => {
     const roomId = room?.id;
     if (!roomId) return;
@@ -327,7 +347,7 @@ function TVModePageContent() {
       publishPrimaryPlayhead();
     }, SYNC_INTERVAL_MS);
 
-    const followerTick = window.setInterval(() => {
+    const pullPlayhead = () => {
       if (isPrimaryTVRef.current) return;
       fetchLastPlayhead(roomId).then((p) => {
         if (isPrimaryTVRef.current) return;
@@ -346,13 +366,45 @@ function TVModePageContent() {
           wallMs: p.wallMs,
         });
       });
-    }, FOLLOWER_POLL_MS);
+    };
+
+    const followerTick = window.setInterval(pullPlayhead, FOLLOWER_POLL_MS);
+
+    const driftTick = window.setInterval(() => {
+      if (isPrimaryTVRef.current || !followerSyncedRef.current) return;
+      const known = lastKnownPlayheadRef.current;
+      if (!known?.entryId) return;
+      const local = readLocalPlayhead();
+      if (!local || local.state === 3) return;
+      const ageMs = Date.now() - known.wallMs;
+      const expectedMain = known.paused
+        ? known.t
+        : known.t + Math.max(0, ageMs) / 1000;
+      const expectedTarget = known.paused
+        ? expectedMain
+        : Math.max(0, expectedMain - FOLLOW_TRAIL_SEC);
+      const err = local.t - expectedTarget;
+      const aheadOfMain = local.t - expectedMain;
+      if (
+        aheadOfMain > -AHEAD_EPS_SEC ||
+        err > SYNC_DRIFT_SEC ||
+        err < -SYNC_DRIFT_SEC
+      ) {
+        console.warn('[tv] Drift >300ms or ahead — requesting main time', {
+          local: local.t.toFixed(2),
+          expected: expectedTarget.toFixed(2),
+          aheadMain: aheadOfMain.toFixed(2),
+        });
+        pullPlayhead();
+      }
+    }, DRIFT_CHECK_MS);
 
     return () => {
       window.clearInterval(primaryTick);
       window.clearInterval(followerTick);
+      window.clearInterval(driftTick);
     };
-  }, [room?.id, publishPrimaryPlayhead, applyFollowerPlayhead]);
+  }, [room?.id, publishPrimaryPlayhead, applyFollowerPlayhead, readLocalPlayhead]);
 
   // Primary: publish immediately on song change so secondary can leave "Syncing…"
   useEffect(() => {
@@ -660,6 +712,7 @@ function TVModePageContent() {
               setSeekOffsetSeconds(0);
               seekOffsetRef.current = 0;
               pendingPlayheadRef.current = null;
+              lastKnownPlayheadRef.current = null;
               if (!isPrimaryTVRef.current) {
                 markFollowerUnsynced('song change');
               }
@@ -826,6 +879,7 @@ function TVModePageContent() {
       followerSyncedRef.current = isPrimary;
       setFollowerSynced(isPrimary);
       lastFollowerSeekAtRef.current = 0;
+      lastKnownPlayheadRef.current = null;
       if (isPrimary) {
         console.log('[tv] ✅ Primary — clock source for room');
       } else {

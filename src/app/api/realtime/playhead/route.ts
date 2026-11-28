@@ -20,8 +20,9 @@ let columnEnsured = false;
 /** Throttle DB writes so primary Smart TVs are not blocked by Postgres every tick. */
 const lastDbPersistAt = new Map<string, number>();
 const lastDbEntryId = new Map<string, string | undefined>();
-const DB_PERSIST_MIN_MS = 750;
-const MEMORY_FRESH_MS = 2500;
+const DB_PERSIST_MIN_MS = 5000;
+/** Sparse primary posts (~15s) — keep memory packet usable between broadcasts */
+const MEMORY_FRESH_MS = 20000;
 
 /** Idempotent: secondaries stuck on Syncing if this column was never migrated. */
 async function ensureTvPlayheadColumn() {
