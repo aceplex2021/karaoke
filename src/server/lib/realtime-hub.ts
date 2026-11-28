@@ -38,6 +38,11 @@ export function getLastPlayhead(roomId: string): Record<string, unknown> | null 
   return lastPlayheadByRoom.get(roomId) || null;
 }
 
+/** Drop cached playhead (e.g. on song advance) so secondaries do not apply the old entry. */
+export function clearPlayhead(roomId: string) {
+  lastPlayheadByRoom.delete(roomId);
+}
+
 export function subscribePlayhead(roomId: string, fn: PlayheadListener) {
   const key = `playhead:${roomId}`;
   playheadBus.on(key, fn);

@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
+import { clearPlayhead } from '@/server/lib/realtime-hub';
+import { query, useLocalPg } from '@/server/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+/** Drop stale playhead so secondaries do not stay Syncing on the previous entry. */
+async function clearRoomPlayhead(roomId: string) {
+  clearPlayhead(roomId);
+  try {
+    if (useLocalPg) {
+      await query(`UPDATE kara_rooms SET tv_playhead = NULL WHERE id = $1::uuid`, [roomId]);
+    } else {
+      await supabaseAdmin.from('kara_rooms').update({ tv_playhead: null }).eq('id', roomId);
+    }
+  } catch (err) {
+    console.warn('[advance] clear playhead failed', err);
+  }
+}
 
 /**
  * POST /api/rooms/[roomId]/advance
@@ -61,6 +77,7 @@ export async function POST(
 
       // Stamp start time for secondary TV seek (idempotent if RPC already set it)
       if (advanced) {
+        await clearRoomPlayhead(roomId);
         await supabaseAdmin
           .from('kara_rooms')
           .update({ current_song_started_at: new Date().toISOString() })
@@ -137,6 +154,7 @@ async function inlineAdvance(roomId: string, currentEntryId: string | null) {
     .maybeSingle();
 
   if (!next) {
+    await clearRoomPlayhead(roomId);
     await supabaseAdmin
       .from('kara_rooms')
       .update({
@@ -158,6 +176,7 @@ async function inlineAdvance(roomId: string, currentEntryId: string | null) {
     .update({ status: 'playing', started_at: new Date().toISOString() })
     .eq('id', next.id);
 
+  await clearRoomPlayhead(roomId);
   await supabaseAdmin
     .from('kara_rooms')
     .update({

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLastPlayhead, publishPlayhead } from '@/server/lib/realtime-hub';
+import {
+  clearPlayhead,
+  getLastPlayhead,
+  publishPlayhead,
+} from '@/server/lib/realtime-hub';
 import { query, useLocalPg } from '@/server/lib/db';
 import { supabaseAdmin } from '@/server/lib/supabase';
 
@@ -12,7 +16,23 @@ type PlayheadPayload = {
   wallMs: number;
 };
 
+let columnEnsured = false;
+
+/** Idempotent: secondaries stuck on Syncing if this column was never migrated. */
+async function ensureTvPlayheadColumn() {
+  if (columnEnsured || !useLocalPg) return;
+  try {
+    await query(
+      `ALTER TABLE kara_rooms ADD COLUMN IF NOT EXISTS tv_playhead JSONB`
+    );
+    columnEnsured = true;
+  } catch (err) {
+    console.warn('[playhead] ensure column failed', err);
+  }
+}
+
 async function persistPlayhead(roomId: string, payload: PlayheadPayload) {
+  await ensureTvPlayheadColumn();
   try {
     if (useLocalPg) {
       await query(`UPDATE kara_rooms SET tv_playhead = $2::jsonb WHERE id = $1::uuid`, [
@@ -21,16 +41,31 @@ async function persistPlayhead(roomId: string, payload: PlayheadPayload) {
       ]);
       return;
     }
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('kara_rooms')
       .update({ tv_playhead: payload })
       .eq('id', roomId);
+    if (error) console.warn('[playhead] persist failed', error.message);
   } catch (err) {
     console.warn('[playhead] persist failed', err);
   }
 }
 
+async function clearPlayheadDb(roomId: string) {
+  await ensureTvPlayheadColumn();
+  try {
+    if (useLocalPg) {
+      await query(`UPDATE kara_rooms SET tv_playhead = NULL WHERE id = $1::uuid`, [roomId]);
+      return;
+    }
+    await supabaseAdmin.from('kara_rooms').update({ tv_playhead: null }).eq('id', roomId);
+  } catch (err) {
+    console.warn('[playhead] clear failed', err);
+  }
+}
+
 async function loadPlayheadFromDb(roomId: string): Promise<PlayheadPayload | null> {
+  await ensureTvPlayheadColumn();
   try {
     if (useLocalPg) {
       const { rows } = await query<{ tv_playhead: PlayheadPayload | null }>(
@@ -41,11 +76,15 @@ async function loadPlayheadFromDb(roomId: string): Promise<PlayheadPayload | nul
       if (!p || typeof p.t !== 'number') return null;
       return p;
     }
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('kara_rooms')
       .select('tv_playhead')
       .eq('id', roomId)
       .maybeSingle();
+    if (error) {
+      console.warn('[playhead] load failed', error.message);
+      return null;
+    }
     const p = data?.tv_playhead as PlayheadPayload | null;
     if (!p || typeof p.t !== 'number') return null;
     return p;
@@ -66,9 +105,16 @@ export async function GET(request: NextRequest) {
   }
 
   let payload = getLastPlayhead(roomId) as PlayheadPayload | null;
-  if (!payload) {
-    payload = await loadPlayheadFromDb(roomId);
-    if (payload) {
+  // Prefer DB when memory packet is missing OR older than DB (multi-worker)
+  const fromDb = await loadPlayheadFromDb(roomId);
+  if (fromDb) {
+    if (
+      !payload ||
+      (typeof fromDb.wallMs === 'number' &&
+        typeof payload.wallMs === 'number' &&
+        fromDb.wallMs > payload.wallMs)
+    ) {
+      payload = fromDb;
       publishPlayhead(roomId, payload as unknown as Record<string, unknown>);
     }
   }
@@ -78,7 +124,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/realtime/playhead
- * Primary TV posts playhead; memory + SSE + DB persist.
+ * Primary TV posts playhead; memory + SSE + DB persist (awaited for cross-worker polls).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -99,8 +145,8 @@ export async function POST(request: NextRequest) {
     };
 
     publishPlayhead(String(roomId), payload as unknown as Record<string, unknown>);
-    // Fire-and-forget DB write so secondaries on other workers can poll
-    void persistPlayhead(String(roomId), payload);
+    // Await so secondary on another worker sees playhead on next poll (fixes stuck Syncing)
+    await persistPlayhead(String(roomId), payload);
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
@@ -109,4 +155,15 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+}
+
+/** DELETE — clear playhead (song advance). Optional helper used by advance route via hub+DB. */
+export async function DELETE(request: NextRequest) {
+  const roomId = request.nextUrl.searchParams.get('roomId');
+  if (!roomId) {
+    return NextResponse.json({ error: 'roomId required' }, { status: 400 });
+  }
+  clearPlayhead(roomId);
+  await clearPlayheadDb(roomId);
+  return NextResponse.json({ ok: true });
 }
