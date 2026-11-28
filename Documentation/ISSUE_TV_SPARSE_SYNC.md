@@ -1,7 +1,7 @@
 # Issue: Sparse multi-TV sync (reduce constant chase)
 
 **Date:** 2026-11-28  
-**Status:** Fix2 — seed/live lock + primary burst (stale t:0 / ahead on new songs)  
+**Status:** Fix3 — song-start lock &lt;100ms; remove ahead-eps thrash; free-run only corrects &gt;300ms  
 **Checkpoint:** `checkpoint-known-good-sync-before-sparse-broadcast` @ `3ed02db`
 
 ## 1. Current Behavior
@@ -25,15 +25,16 @@ Follow rate was tuned for continuous lock, not sparse lock-and-free-run.
 - **Rollback:** `git reset --hard checkpoint-known-good-sync-before-sparse-broadcast`
 
 ## 5. Proposed Fix
-- Primary: `PRIMARY_POST_MIN_MS` / interval ≈ 15s; force on song change + play/pause
-- Secondary poll backup ≈ 15s; on-demand fetch if local drift estimate &gt;300ms
-- Trail 50ms; seek if ahead of main OR |error vs target| &gt;300ms; always seek on first lock
-- Raise GET `MEMORY_FRESH_MS` so 15s packets stay in memory without DB hammer
+- Primary: burst ~1s for first 20s, then ~15s; force on song change + play/pause
+- Secondary: lock-phase poll 1s until |error| ≤100ms (max 2 seeks + verify); then free-run
+- Free-run seek / drift-pull only if ahead of main **or** behind trail by **&gt;300ms** (removed 20ms ahead-eps clamp that caused fwd/back thrash)
+- Trail 50ms; mild age extrapolate on apply for seek target only
+- Drift check every 10s; follower poll backup 15s
 
 ## 6. Test Plan
-- [ ] Song start: HP leaves Syncing, locks near primary, trails (~50ms+)
-- [ ] Mid-song 2–3 min: no seek thrash; occasional correct if drift &gt;300ms
-- [ ] HP never leads primary
-- [ ] Refresh HP mid-song: Syncing → lock to live main (not yanked to 0 wrongly)
+- [ ] Song start: console shows `Song-start lock OK` with |errMs| &lt;100; few Follow seeks
+- [ ] Mid-song: Free-run OK; no constant “Drift &gt;300ms — requesting”
+- [ ] HP trails; does not oscillate seek forward then back every ~3s
+- [ ] Refresh HP mid-song: Syncing → lock (not yanked to 0)
 - [ ] Primary Samsung: keeps playing; still broadcasts
 - [ ] Rollback tag still points at prior good build

@@ -128,6 +128,11 @@ function TVModePageContent() {
     lastFollowerSeekAtRef.current = 0;
     lastKnownPlayheadRef.current = null;
     awaitingLiveLockRef.current = true;
+    lockSeekCountRef.current = 0;
+    if (lockVerifyTimerRef.current) {
+      clearTimeout(lockVerifyTimerRef.current);
+      lockVerifyTimerRef.current = null;
+    }
     songStartedAtRef.current = Date.now();
     console.log('[tv] Secondary unsynced:', reason);
     const yt = youtubePlayerRef.current;
@@ -144,21 +149,23 @@ function TVModePageContent() {
     seed?: boolean;
   };
 
-  // Sparse sync: song-start burst lock + ~15s broadcast; seek on >300ms drift / lead.
+  // Sparse sync: tight song-start lock (<100ms), then free-run; correct only if >300ms.
   // Primary posts from onTimeUpdate (Samsung throttles setInterval).
-  const PRIMARY_BURST_MS = 45000; // dense posts at song start for <100ms lock
-  const PRIMARY_BURST_POST_MIN_MS = 2000;
+  const PRIMARY_BURST_MS = 20000; // dense posts only at song start
+  const PRIMARY_BURST_POST_MIN_MS = 1000;
   const PRIMARY_SPARSE_POST_MIN_MS = 15000;
   const SYNC_INTERVAL_MS = 2000; // tick often; publishPrimaryPlayhead self-gates
-  const FOLLOWER_POLL_MS = 10000;
-  const DRIFT_CHECK_MS = 3000;
-  const FOLLOW_TRAIL_SEC = 0.05; // ≥50ms behind main
-  const SYNC_DRIFT_SEC = 0.3; // correct only when |error| > 300ms (or ahead of main)
-  const AHEAD_EPS_SEC = 0.02; // treat as ahead of main if within/past this
-  const SEEK_COOLDOWN_MS = 2500;
-  const PLAYHEAD_STALE_MS = 45000; // tolerate 15s broadcast gaps
+  const FOLLOWER_POLL_MS = 15000;
+  const DRIFT_CHECK_MS = 10000; // free-run: rare checks
+  const LOCK_POLL_MS = 1000; // while locking song start
+  const FOLLOW_TRAIL_SEC = 0.05; // seek target = main − 50ms
+  const LOCK_OK_SEC = 0.1; // song-start success = within 100ms of trail
+  const SYNC_DRIFT_SEC = 0.3; // free-run: correct only if |error| > 300ms
+  const SEEK_COOLDOWN_MS = 3500; // let YouTube finish buffering after a seek
+  const PLAYHEAD_STALE_MS = 45000;
   const VISIBILITY_UNSYNC_MS = 2000;
-  const YANK_TO_ZERO_LOCAL_SEC = 2; // never seek back near 0 once past this
+  const YANK_TO_ZERO_LOCAL_SEC = 2;
+  const MAX_LOCK_SEEKS = 2;
 
   const hiddenAtRef = useRef<number | null>(null);
   const pollDiagAtRef = useRef(0);
@@ -167,8 +174,10 @@ function TVModePageContent() {
   const songStartedAtRef = useRef(0);
   /** Last accepted playhead — secondary free-runs against this between broadcasts */
   const lastKnownPlayheadRef = useRef<PlayheadPayload | null>(null);
-  /** True until a live (non-seed) primary playhead locks timing */
+  /** True until song-start lock is within LOCK_OK_SEC of live primary */
   const awaitingLiveLockRef = useRef(false);
+  const lockSeekCountRef = useRef(0);
+  const lockVerifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Playhead arrived before YouTube/HTML5 player ready — apply on ready */
   const pendingPlayheadRef = useRef<PlayheadPayload | null>(null);
 
@@ -251,7 +260,6 @@ function TVModePageContent() {
 
     if (ageMs > PLAYHEAD_STALE_MS) {
       if (followerSyncedRef.current) {
-        // Frozen seed left behind after primary stopped posting — keep polling, don't "trust" it
         if (isSeed || payload.t < 0.5) {
           awaitingLiveLockRef.current = true;
           if (now - pollDiagAtRef.current > 10000) {
@@ -295,7 +303,7 @@ function TVModePageContent() {
     pendingPlayheadRef.current = null;
 
     const local = readLocalPlayhead();
-    // While buffering after live lock, skip; still allow first / live-lock seek
+    // Free-run: skip while buffering. Lock phase may still seek once buffering ends.
     if (
       local?.state === 3 &&
       followerSyncedRef.current &&
@@ -304,8 +312,10 @@ function TVModePageContent() {
       return;
     }
 
-    // Trail: never lead main. Target = main − 50ms when playing.
-    const mainT = payload.t;
+    // Mild age extrapolate so seek lands near where primary is *now*
+    const ageSec =
+      !payload.paused && ageMs > 200 && ageMs < 5000 ? ageMs / 1000 : 0;
+    const mainT = payload.t + ageSec;
     const target = payload.paused
       ? mainT
       : Math.max(0, mainT - FOLLOW_TRAIL_SEC);
@@ -314,7 +324,8 @@ function TVModePageContent() {
     const behindTarget = target - localT;
     const aheadOfMain = localT - mainT;
     const firstCatchUp = !followerSyncedRef.current;
-    const liveLock = awaitingLiveLockRef.current && !isSeed;
+    const locking = awaitingLiveLockRef.current && !isSeed;
+    const absErr = Math.abs(aheadOfTarget);
 
     // Never yank playing secondary back to ~0 from a late seed / stale t:0
     if (
@@ -334,31 +345,48 @@ function TVModePageContent() {
       return;
     }
 
+    // Seeds only park readiness — don't thrash seeks on t≈0
+    if (isSeed && followerSyncedRef.current && localT > 1) {
+      lastKnownPlayheadRef.current = payload;
+      awaitingLiveLockRef.current = true;
+      return;
+    }
+
+    // Keep original t/wallMs — drift tick extrapolates from wall; don't double-count age
     lastKnownPlayheadRef.current = payload;
 
-    // Song-start / live lock always; later only if ahead of main or |drift| > 300ms
-    const needsSeek =
-      firstCatchUp ||
-      liveLock ||
-      aheadOfMain > -AHEAD_EPS_SEC ||
-      aheadOfTarget > SYNC_DRIFT_SEC ||
-      behindTarget > SYNC_DRIFT_SEC;
+    // Lock phase: seek only if |error| > 100ms (or first catch-up). Cap seeks.
+    // Free-run: seek only if ahead of main OR behind trail by > 300ms (symmetric).
+    let needsSeek = false;
+    if (firstCatchUp) {
+      needsSeek = true;
+    } else if (locking) {
+      needsSeek =
+        absErr > LOCK_OK_SEC && lockSeekCountRef.current < MAX_LOCK_SEEKS;
+    } else {
+      needsSeek =
+        aheadOfMain > SYNC_DRIFT_SEC || behindTarget > SYNC_DRIFT_SEC;
+    }
+
     const canSeek =
       needsSeek &&
       (firstCatchUp ||
-        liveLock ||
+        locking ||
         now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS);
 
     if (canSeek) {
       lastFollowerSeekAtRef.current = now;
+      if (locking || firstCatchUp) lockSeekCountRef.current += 1;
       console.log('[tv] Follow seek', {
         from: localT.toFixed(2),
         to: target.toFixed(2),
         main: mainT.toFixed(2),
         aheadMain: aheadOfMain.toFixed(2),
+        err: aheadOfTarget.toFixed(2),
         first: firstCatchUp,
-        liveLock,
+        locking,
         seed: isSeed,
+        lockN: lockSeekCountRef.current,
       });
       if (yt) yt.seekTo(target);
       else if (video) {
@@ -368,30 +396,82 @@ function TVModePageContent() {
           /* ignore */
         }
       }
+
+      // After lock seek: verify within ~1s; clear lock if <100ms else one more try
+      if ((locking || firstCatchUp) && !isSeed) {
+        if (lockVerifyTimerRef.current) clearTimeout(lockVerifyTimerRef.current);
+        lockVerifyTimerRef.current = setTimeout(() => {
+          lockVerifyTimerRef.current = null;
+          if (isPrimaryTVRef.current || !awaitingLiveLockRef.current) return;
+          const loc = readLocalPlayhead();
+          const known = lastKnownPlayheadRef.current;
+          if (!loc || !known || known.paused) {
+            awaitingLiveLockRef.current = false;
+            return;
+          }
+          const age = Math.max(0, Date.now() - known.wallMs) / 1000;
+          const mainNow = known.t + age;
+          const trail = Math.max(0, mainNow - FOLLOW_TRAIL_SEC);
+          const err = loc.t - trail;
+          if (Math.abs(err) <= LOCK_OK_SEC) {
+            awaitingLiveLockRef.current = false;
+            console.log('[tv] Song-start lock OK', {
+              errMs: (err * 1000).toFixed(0),
+              local: loc.t.toFixed(2),
+              trail: trail.toFixed(2),
+            });
+          } else if (lockSeekCountRef.current < MAX_LOCK_SEEKS) {
+            console.warn('[tv] Lock verify miss — corrective seek', {
+              err: err.toFixed(2),
+              lockN: lockSeekCountRef.current,
+            });
+            applyFollowerPlayhead({
+              ...known,
+              t: mainNow,
+              wallMs: Date.now(),
+              seed: false,
+            });
+          } else {
+            awaitingLiveLockRef.current = false;
+            console.warn('[tv] Lock give-up — free-run', {
+              err: err.toFixed(2),
+            });
+          }
+        }, 1000);
+      }
+    } else if (locking && !isSeed && absErr <= LOCK_OK_SEC) {
+      awaitingLiveLockRef.current = false;
+      console.log('[tv] Song-start lock OK (no seek)', {
+        errMs: (aheadOfTarget * 1000).toFixed(0),
+        local: localT.toFixed(2),
+        trail: target.toFixed(2),
+      });
+    } else if (locking && lockSeekCountRef.current >= MAX_LOCK_SEEKS) {
+      awaitingLiveLockRef.current = false;
+      console.warn('[tv] Lock seek cap — free-run', {
+        err: aheadOfTarget.toFixed(2),
+      });
     } else if (now - pollDiagAtRef.current > 20000) {
       pollDiagAtRef.current = now;
       console.log('[tv] Free-run OK', {
         local: localT.toFixed(2),
         target: target.toFixed(2),
         main: mainT.toFixed(2),
+        aheadMain: aheadOfMain.toFixed(2),
       });
     }
 
     if (!followerSyncedRef.current) {
       followerSyncedRef.current = true;
       setFollowerSynced(true);
-      awaitingLiveLockRef.current = isSeed || mainT < 0.25;
+      awaitingLiveLockRef.current = isSeed || mainT < 0.25 || absErr > LOCK_OK_SEC;
+      lockSeekCountRef.current = firstCatchUp && canSeek ? 1 : 0;
       console.log(
         '[tv] Secondary synced at',
         target.toFixed(2),
         's',
-        awaitingLiveLockRef.current ? '(awaiting live primary)' : ''
+        awaitingLiveLockRef.current ? '(awaiting song-start lock)' : ''
       );
-    } else if (liveLock) {
-      awaitingLiveLockRef.current = false;
-      console.log('[tv] Live primary lock at', target.toFixed(2), 's');
-    } else if (!isSeed && awaitingLiveLockRef.current) {
-      awaitingLiveLockRef.current = false;
     }
 
     // Only toggle play/pause when needed — yt.play() every poll stresses Smart TVs
@@ -411,7 +491,7 @@ function TVModePageContent() {
     }
   }, [readLocalPlayhead]);
 
-  // Primary ~15s broadcast; secondary rare poll + on-demand when local drift > 300ms
+  // Primary ~15s broadcast; secondary rare poll; lock-phase poll; drift pull only if >300ms
   useEffect(() => {
     const roomId = room?.id;
     if (!roomId) return;
@@ -444,13 +524,16 @@ function TVModePageContent() {
 
     const followerTick = window.setInterval(pullPlayhead, FOLLOWER_POLL_MS);
 
-    const driftTick = window.setInterval(() => {
+    const lockTick = window.setInterval(() => {
       if (isPrimaryTVRef.current) return;
-      // Unsynced or seed-only lock: keep asking for live primary
       if (!followerSyncedRef.current || awaitingLiveLockRef.current) {
         pullPlayhead();
-        return;
       }
+    }, LOCK_POLL_MS);
+
+    const driftTick = window.setInterval(() => {
+      if (isPrimaryTVRef.current) return;
+      if (!followerSyncedRef.current || awaitingLiveLockRef.current) return;
       const known = lastKnownPlayheadRef.current;
       if (!known?.entryId) return;
       const local = readLocalPlayhead();
@@ -462,16 +545,15 @@ function TVModePageContent() {
       const expectedTarget = known.paused
         ? expectedMain
         : Math.max(0, expectedMain - FOLLOW_TRAIL_SEC);
-      const err = local.t - expectedTarget;
       const aheadOfMain = local.t - expectedMain;
+      const behindTarget = expectedTarget - local.t;
       if (
         known.seed ||
         (known.t < 0.5 && ageMs > 10000) ||
-        aheadOfMain > -AHEAD_EPS_SEC ||
-        err > SYNC_DRIFT_SEC ||
-        err < -SYNC_DRIFT_SEC
+        aheadOfMain > SYNC_DRIFT_SEC ||
+        behindTarget > SYNC_DRIFT_SEC
       ) {
-        console.warn('[tv] Drift >300ms / ahead / seed — requesting main time', {
+        console.warn('[tv] Drift >300ms — requesting main time', {
           local: local.t.toFixed(2),
           expected: expectedTarget.toFixed(2),
           aheadMain: aheadOfMain.toFixed(2),
@@ -483,7 +565,12 @@ function TVModePageContent() {
     return () => {
       window.clearInterval(primaryTick);
       window.clearInterval(followerTick);
+      window.clearInterval(lockTick);
       window.clearInterval(driftTick);
+      if (lockVerifyTimerRef.current) {
+        clearTimeout(lockVerifyTimerRef.current);
+        lockVerifyTimerRef.current = null;
+      }
     };
   }, [room?.id, publishPrimaryPlayhead, applyFollowerPlayhead, readLocalPlayhead]);
 
@@ -805,6 +892,11 @@ function TVModePageContent() {
               pendingPlayheadRef.current = null;
               lastKnownPlayheadRef.current = null;
               awaitingLiveLockRef.current = true;
+              lockSeekCountRef.current = 0;
+              if (lockVerifyTimerRef.current) {
+                clearTimeout(lockVerifyTimerRef.current);
+                lockVerifyTimerRef.current = null;
+              }
               songStartedAtRef.current = Date.now();
               if (!isPrimaryTVRef.current) {
                 markFollowerUnsynced('song change');
