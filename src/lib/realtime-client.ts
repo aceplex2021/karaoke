@@ -87,3 +87,30 @@ export async function postPlayhead(payload: {
   }
 }
 
+/** Secondary delivery backup when SSE playhead events are dropped. */
+export async function fetchLastPlayhead(roomId: string): Promise<{
+  entryId?: string;
+  t: number;
+  paused: boolean;
+  wallMs: number;
+} | null> {
+  try {
+    const res = await fetch(
+      `/api/realtime/playhead?roomId=${encodeURIComponent(roomId)}`,
+      { cache: 'no-store' }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const p = data?.playhead;
+    if (!p || typeof p.t !== 'number') return null;
+    return {
+      entryId: p.entryId,
+      t: p.t,
+      paused: Boolean(p.paused),
+      wallMs: typeof p.wallMs === 'number' ? p.wallMs : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+

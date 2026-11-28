@@ -11,7 +11,7 @@ import type { Room, QueueItem } from '@/shared/types';
 import { YouTubePlayer, type YouTubePlayerHandle } from '@/components/YouTubePlayer';
 import { appConfig } from '@/lib/config';
 import { extractYouTubeId } from '@/lib/youtube';
-import { connectRoomRealtime, postPlayhead } from '@/lib/realtime-client';
+import { connectRoomRealtime, fetchLastPlayhead, postPlayhead } from '@/lib/realtime-client';
 import { isConstrainedTvBrowser } from '@/lib/utils';
 
 /**
@@ -56,11 +56,13 @@ function TVModePageContent() {
   const [joinedMidSong, setJoinedMidSong] = useState(false); // legacy flag (no longer freezes playback)
   const [seekOffsetSeconds, setSeekOffsetSeconds] = useState(0); // primary mid-song resume only
   const [useRealtime, setUseRealtime] = useState(true); // v4.4: Use Realtime (fallback to polling if false)
+  /** Secondary: false until first fresh playhead applied — prefer black over mismatch */
+  const [followerSynced, setFollowerSynced] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const lastFollowerSeekAtRef = useRef(0);
-  const followerCaughtUpRef = useRef(false);
+  const followerSyncedRef = useRef(false);
   const sseUnsubRef = useRef<(() => void) | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
@@ -116,6 +118,20 @@ function TVModePageContent() {
     }
   }, [isPrimaryTV]);
 
+  useEffect(() => {
+    followerSyncedRef.current = followerSynced;
+  }, [followerSynced]);
+
+  const markFollowerUnsynced = useCallback(() => {
+    followerSyncedRef.current = false;
+    setFollowerSynced(false);
+    lastFollowerSeekAtRef.current = 0;
+    const yt = youtubePlayerRef.current;
+    if (yt) yt.pause();
+    const video = videoRef.current;
+    if (video && !video.paused) video.pause();
+  }, []);
+
   type PlayheadPayload = {
     entryId: string;
     t: number;
@@ -123,11 +139,13 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Simple model: primary = clock (SSE). Secondary = mute + follow. No wall/poll clocks.
+  // Primary = clock. Secondary = paused until playhead, then trail slightly behind.
   const SYNC_INTERVAL_MS = isConstrainedTvBrowser() ? 250 : 150;
-  const SYNC_DRIFT_SEC = 1.5;
+  const FOLLOWER_POLL_MS = 500;
+  const SYNC_DRIFT_SEC = 1.25;
   const SEEK_COOLDOWN_MS = 2000;
-  const PLAYHEAD_STALE_MS = 2000;
+  const PLAYHEAD_STALE_MS = 2500;
+  const FOLLOW_LAG_SEC = 0.35; // secondary intentionally a bit behind main
 
   const readLocalPlayhead = useCallback((): {
     t: number;
@@ -167,20 +185,25 @@ function TVModePageContent() {
     if (!yt && !(video && video.src)) return;
 
     const local = readLocalPlayhead();
-    if (local?.state === 3) return;
+    // Allow first catch-up even while buffering; skip later seeks during buffer
+    if (local?.state === 3 && followerSyncedRef.current) return;
 
-    const target = payload.t;
+    // Trail primary slightly so secondary never leads
+    const target = Math.max(0, payload.t - FOLLOW_LAG_SEC);
     const localT = local?.t ?? 0;
     const drift = Math.abs(localT - target);
-    const firstCatchUp = !followerCaughtUpRef.current;
+    const firstCatchUp = !followerSyncedRef.current;
     const canSeek =
-      (firstCatchUp && drift > 0.5) ||
+      firstCatchUp ||
       (drift > SYNC_DRIFT_SEC && now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS);
 
-    if (canSeek) {
+    if (canSeek && (firstCatchUp || drift > SYNC_DRIFT_SEC)) {
       lastFollowerSeekAtRef.current = now;
-      followerCaughtUpRef.current = true;
-      console.log('[tv] Follow seek', { from: localT.toFixed(1), to: target.toFixed(1) });
+      console.log('[tv] Follow seek', {
+        from: localT.toFixed(1),
+        to: target.toFixed(1),
+        first: firstCatchUp,
+      });
       if (yt) yt.seekTo(target);
       else if (video) {
         try {
@@ -189,21 +212,32 @@ function TVModePageContent() {
           /* ignore */
         }
       }
-    } else if (!followerCaughtUpRef.current) {
-      followerCaughtUpRef.current = true;
+    }
+
+    // After we have a position, play only if primary is playing
+    if (!followerSyncedRef.current) {
+      followerSyncedRef.current = true;
+      setFollowerSynced(true);
+      console.log('[tv] Secondary synced to primary at', target.toFixed(1), 's');
     }
 
     if (yt) {
       const state = local?.state ?? null;
-      if (payload.paused && state !== 2) yt.pause();
-      else if (!payload.paused && (state === 2 || state === -1 || state === 5)) yt.play();
+      if (payload.paused) {
+        if (state !== 2) yt.pause();
+      } else {
+        yt.play();
+      }
     } else if (video) {
-      if (payload.paused && !video.paused) video.pause();
-      else if (!payload.paused && video.paused) video.play().catch(() => {});
+      if (payload.paused) {
+        if (!video.paused) video.pause();
+      } else if (video.paused) {
+        video.play().catch(() => {});
+      }
     }
   }, [readLocalPlayhead]);
 
-  // Primary only: publish playhead. Secondary follows via SSE onPlayhead (no poll / wall).
+  // Primary posts; secondary polls hub (SSE playhead often dropped — logs had zero Follow seek)
   useEffect(() => {
     const roomId = room?.id;
     if (!roomId) return;
@@ -223,8 +257,36 @@ function TVModePageContent() {
       });
     }, SYNC_INTERVAL_MS);
 
-    return () => window.clearInterval(primaryTick);
-  }, [room?.id, readLocalPlayhead]);
+    const followerTick = window.setInterval(() => {
+      if (isPrimaryTVRef.current) return;
+      fetchLastPlayhead(roomId).then((p) => {
+        if (isPrimaryTVRef.current || !p?.entryId) return;
+        applyFollowerPlayhead({
+          entryId: p.entryId,
+          t: p.t,
+          paused: p.paused,
+          wallMs: p.wallMs,
+        });
+      });
+    }, FOLLOWER_POLL_MS);
+
+    return () => {
+      window.clearInterval(primaryTick);
+      window.clearInterval(followerTick);
+    };
+  }, [room?.id, readLocalPlayhead, applyFollowerPlayhead]);
+
+  // Leaving the tab / returning: don't resume local position — wait for primary again
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (isPrimaryTVRef.current) return;
+      console.log('[tv] Secondary tab visible — pause until primary playhead');
+      markFollowerUnsynced();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [markFollowerUnsynced]);
 
   const getTvAdvanceOpts = () => {
     const id = tvId || (typeof window !== 'undefined' ? localStorage.getItem('tv_id') : null);
@@ -502,11 +564,15 @@ function TVModePageContent() {
             }
             setQueue(state.queue);
             setUpNext(state.upNext);
-            // New song: reset follower catch-up; secondary waits for playhead (no wall seek)
+            // New song: secondary pauses until next primary playhead
             if (nextEntryId !== prevEntryId) {
               setSeekOffsetSeconds(0);
               seekOffsetRef.current = 0;
-              followerCaughtUpRef.current = false;
+              if (!isPrimaryTVRef.current) {
+                followerSyncedRef.current = false;
+                setFollowerSynced(false);
+                lastFollowerSeekAtRef.current = 0;
+              }
             }
           }
         } catch (err: any) {
@@ -668,14 +734,16 @@ function TVModePageContent() {
         }
       }
       
-      // Secondary: start at 0 muted, catch up on first SSE playhead. Primary starts normally.
-      followerCaughtUpRef.current = isPrimary;
+      // Secondary: paused/black until first playhead. Primary starts normally.
       setSeekOffsetSeconds(0);
       seekOffsetRef.current = 0;
+      followerSyncedRef.current = isPrimary;
+      setFollowerSynced(isPrimary);
+      lastFollowerSeekAtRef.current = 0;
       if (isPrimary) {
         console.log('[tv] ✅ Primary — clock source for room');
       } else {
-        console.log('[tv] Secondary — waiting for SSE playhead from primary');
+        console.log('[tv] Secondary — paused until primary playhead');
       }
       setJoinedMidSong(false);
       initialEntryIdRef.current = null;
@@ -1127,6 +1195,10 @@ function TVModePageContent() {
             onReady={() => {
               playingQueueItemIdRef.current = currentSong.id;
               console.log('[TV] YouTube player ready, tracking queue item:', currentSong.id);
+              // Secondary: never free-run from 0 — stay paused until primary playhead
+              if (!isPrimaryTVRef.current && !followerSyncedRef.current) {
+                youtubePlayerRef.current?.pause();
+              }
             }}
             onEnded={isPrimaryTV ? handleEnded : undefined}
             onError={(code) => {
@@ -1135,6 +1207,14 @@ function TVModePageContent() {
             }}
             onStateChange={(state) => {
               ytPlayerStateRef.current = state;
+              // If secondary somehow starts playing before sync, force pause
+              if (
+                !isPrimaryTVRef.current &&
+                !followerSyncedRef.current &&
+                state === 1
+              ) {
+                youtubePlayerRef.current?.pause();
+              }
             }}
             onTimeUpdate={(current, dur) => {
               if (Number.isFinite(current)) {
@@ -1150,7 +1230,7 @@ function TVModePageContent() {
               if (Number.isFinite(current)) setCurrentTime(current);
               if (Number.isFinite(dur) && dur > 0) setDuration(dur);
             }}
-            autoPlay={true}
+            autoPlay={isPrimaryTV}
             muted={!isPrimaryTV}
             controls={false}
             startAtSeconds={seekOffsetSeconds}
@@ -1164,20 +1244,45 @@ function TVModePageContent() {
           <video
             key={`${currentSong?.id || 'no-video'}-${currentSong?.song?.media_url || ''}`}
             ref={videoRef}
-            autoPlay
+            autoPlay={isPrimaryTV}
             playsInline
             muted={!isPrimaryTV}
             controls={false}
             onEnded={isPrimaryTV ? handleEnded : undefined}
             onTimeUpdate={handleTimeUpdate}
+            onPlay={() => {
+              if (!isPrimaryTVRef.current && !followerSyncedRef.current && videoRef.current) {
+                videoRef.current.pause();
+              }
+            }}
             style={{
               width: '100%',
               height: '100%',
               objectFit: 'contain',
               pointerEvents: isPrimaryTV ? 'auto' : 'none',
+              visibility: !isPrimaryTV && !followerSynced ? 'hidden' : 'visible',
             }}
           />
         )}
+
+      {/* Secondary: black until matched with main (prefer blank over wrong position) */}
+      {!isPrimaryTV && !followerSynced && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: '#000',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1500,
+            color: '#888',
+            fontSize: '1.25rem',
+          }}
+        >
+          Syncing with main display…
+        </div>
+      )}
 
       {/* User Interaction Overlay (for autoplay) */}
       {needsUserInteraction && !hasUserInteracted && (
