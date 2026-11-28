@@ -140,13 +140,13 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Trail slightly behind main (never lead). Softer rates for Smart TVs.
-  const SYNC_INTERVAL_MS = 200;
-  const FOLLOWER_POLL_MS = 200;
-  const FOLLOW_TRAIL_SEC = 0.15;
-  const SYNC_DRIFT_SEC = 0.25;
-  const SEEK_COOLDOWN_MS = 400;
-  const PLAYHEAD_STALE_MS = 4000;
+  // Gentle on Smart TV primary; secondary trails, free-runs if primary hiccups.
+  const SYNC_INTERVAL_MS = 500;
+  const FOLLOWER_POLL_MS = 400;
+  const FOLLOW_TRAIL_SEC = 0.2;
+  const SYNC_DRIFT_SEC = 0.75;
+  const SEEK_COOLDOWN_MS = 1500;
+  const PLAYHEAD_STALE_MS = 8000;
   const VISIBILITY_UNSYNC_MS = 2000;
 
   const hiddenAtRef = useRef<number | null>(null);
@@ -197,18 +197,6 @@ function TVModePageContent() {
     const now = Date.now();
     const wallMs = typeof payload.wallMs === 'number' ? payload.wallMs : now;
     const ageMs = now - wallMs;
-    if (ageMs > PLAYHEAD_STALE_MS) {
-      if (now - pollDiagAtRef.current > 5000) {
-        pollDiagAtRef.current = now;
-        console.warn('[tv] Playhead stale', { ageMs, t: payload.t });
-      }
-      // Prefer black/pause over free-running ahead of main
-      if (followerSyncedRef.current) {
-        markFollowerUnsynced(`playhead stale ${Math.round(ageMs / 1000)}s`);
-      }
-      return;
-    }
-
     const currentId = currentSongRef.current?.id;
     const roomEntryId = roomRef.current?.current_entry_id;
     // While unsynced, accept room current entry (song-change / refresh race before local song mounts)
@@ -228,6 +216,25 @@ function TVModePageContent() {
         });
       }
       return;
+    }
+
+    if (ageMs > PLAYHEAD_STALE_MS) {
+      if (followerSyncedRef.current) {
+        if (now - pollDiagAtRef.current > 10000) {
+          pollDiagAtRef.current = now;
+          console.warn('[tv] Playhead stale — free-running', {
+            ageMs,
+            t: payload.t,
+          });
+        }
+        // Keep playing; do NOT black-screen (that caused permanent Syncing…)
+        return;
+      }
+      // Refresh while primary hiccuped: still leave Syncing at last known t, then free-run
+      console.warn('[tv] Bootstrapping from stale playhead', {
+        ageMs,
+        t: payload.t,
+      });
     }
 
     const yt = youtubePlayerRef.current;
@@ -252,11 +259,9 @@ function TVModePageContent() {
     const ahead = localT - target;
     const behind = target - localT;
     const firstCatchUp = !followerSyncedRef.current;
-    // Seek back sooner when leading; allow slightly more slack when trailing
+    // Wide deadband — micro-seeks buffer YouTube and cause the "hiccup after a few min"
     const needsSeek =
-      firstCatchUp ||
-      ahead > SYNC_DRIFT_SEC * 0.5 ||
-      behind > SYNC_DRIFT_SEC;
+      firstCatchUp || ahead > SYNC_DRIFT_SEC || behind > SYNC_DRIFT_SEC;
     const canSeek =
       needsSeek &&
       (firstCatchUp || now - lastFollowerSeekAtRef.current >= SEEK_COOLDOWN_MS);
@@ -285,9 +290,14 @@ function TVModePageContent() {
       console.log('[tv] Secondary synced at', target.toFixed(2), 's');
     }
 
+    // Only toggle play/pause when needed — yt.play() every poll stresses Smart TVs
     if (yt) {
-      if (payload.paused) yt.pause();
-      else yt.play();
+      const state = local?.state;
+      if (payload.paused) {
+        if (state === 1) yt.pause();
+      } else if (state === 2 || state === -1 || state === 5) {
+        yt.play();
+      }
     } else if (video) {
       if (payload.paused) {
         if (!video.paused) video.pause();
@@ -295,7 +305,7 @@ function TVModePageContent() {
         video.play().catch(() => {});
       }
     }
-  }, [readLocalPlayhead, markFollowerUnsynced]);
+  }, [readLocalPlayhead]);
 
   // Primary posts; secondary polls DB-backed playhead
   useEffect(() => {

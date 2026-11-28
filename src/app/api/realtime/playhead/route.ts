@@ -17,6 +17,11 @@ type PlayheadPayload = {
 };
 
 let columnEnsured = false;
+/** Throttle DB writes so primary Smart TVs are not blocked by Postgres every tick. */
+const lastDbPersistAt = new Map<string, number>();
+const lastDbEntryId = new Map<string, string | undefined>();
+const DB_PERSIST_MIN_MS = 750;
+const MEMORY_FRESH_MS = 2500;
 
 /** Idempotent: secondaries stuck on Syncing if this column was never migrated. */
 async function ensureTvPlayheadColumn() {
@@ -51,8 +56,20 @@ async function persistPlayhead(roomId: string, payload: PlayheadPayload) {
   }
 }
 
+function schedulePersist(roomId: string, payload: PlayheadPayload) {
+  const now = Date.now();
+  const lastAt = lastDbPersistAt.get(roomId) ?? 0;
+  const entryChanged = lastDbEntryId.get(roomId) !== payload.entryId;
+  if (!entryChanged && now - lastAt < DB_PERSIST_MIN_MS) return;
+  lastDbPersistAt.set(roomId, now);
+  lastDbEntryId.set(roomId, payload.entryId);
+  void persistPlayhead(roomId, payload);
+}
+
 async function clearPlayheadDb(roomId: string) {
   await ensureTvPlayheadColumn();
+  lastDbPersistAt.delete(roomId);
+  lastDbEntryId.delete(roomId);
   try {
     if (useLocalPg) {
       await query(`UPDATE kara_rooms SET tv_playhead = NULL WHERE id = $1::uuid`, [roomId]);
@@ -96,7 +113,7 @@ async function loadPlayheadFromDb(roomId: string): Promise<PlayheadPayload | nul
 
 /**
  * GET /api/realtime/playhead?roomId=...
- * Memory first, then DB (shared across workers).
+ * Prefer fresh in-memory packet (SSE worker); DB only when memory is missing/stale.
  */
 export async function GET(request: NextRequest) {
   const roomId = request.nextUrl.searchParams.get('roomId');
@@ -105,17 +122,24 @@ export async function GET(request: NextRequest) {
   }
 
   let payload = getLastPlayhead(roomId) as PlayheadPayload | null;
-  // Prefer DB when memory packet is missing OR older than DB (multi-worker)
-  const fromDb = await loadPlayheadFromDb(roomId);
-  if (fromDb) {
-    if (
-      !payload ||
-      (typeof fromDb.wallMs === 'number' &&
-        typeof payload.wallMs === 'number' &&
-        fromDb.wallMs > payload.wallMs)
-    ) {
-      payload = fromDb;
-      publishPlayhead(roomId, payload as unknown as Record<string, unknown>);
+  const memAge =
+    payload && typeof payload.wallMs === 'number'
+      ? Date.now() - payload.wallMs
+      : Number.POSITIVE_INFINITY;
+
+  // Avoid SELECT on every secondary poll when this worker already has a fresh packet
+  if (!payload || memAge > MEMORY_FRESH_MS) {
+    const fromDb = await loadPlayheadFromDb(roomId);
+    if (fromDb) {
+      if (
+        !payload ||
+        (typeof fromDb.wallMs === 'number' &&
+          typeof payload.wallMs === 'number' &&
+          fromDb.wallMs > payload.wallMs)
+      ) {
+        payload = fromDb;
+        publishPlayhead(roomId, payload as unknown as Record<string, unknown>);
+      }
     }
   }
 
@@ -124,7 +148,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/realtime/playhead
- * Primary TV posts playhead; memory + SSE + DB persist (awaited for cross-worker polls).
+ * Memory + SSE immediately (keeps primary TV responsive); DB persist throttled + async.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -145,8 +169,7 @@ export async function POST(request: NextRequest) {
     };
 
     publishPlayhead(String(roomId), payload as unknown as Record<string, unknown>);
-    // Await so secondary on another worker sees playhead on next poll (fixes stuck Syncing)
-    await persistPlayhead(String(roomId), payload);
+    schedulePersist(String(roomId), payload);
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
@@ -157,7 +180,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** DELETE — clear playhead (song advance). Optional helper used by advance route via hub+DB. */
+/** DELETE — clear playhead (song advance). */
 export async function DELETE(request: NextRequest) {
   const roomId = request.nextUrl.searchParams.get('roomId');
   if (!roomId) {

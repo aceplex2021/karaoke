@@ -41,7 +41,7 @@ export function connectRoomRealtime(roomId: string, handlers: RealtimeHandlers) 
   };
 }
 
-/** Drop overlapping playhead POSTs — TV browsers pile up promises at 10Hz. */
+/** Drop overlapping playhead POSTs — TV browsers pile up promises. */
 let playheadInFlight = false;
 let playheadQueued: {
   roomId: string;
@@ -50,6 +50,22 @@ let playheadQueued: {
   paused: boolean;
   wallMs?: number;
 } | null = null;
+
+const PLAYHEAD_POST_TIMEOUT_MS = 2500;
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function postPlayhead(payload: {
   roomId: string;
@@ -69,15 +85,19 @@ export async function postPlayhead(payload: {
       const body = next;
       next = null;
       try {
-        await fetch('/api/realtime/playhead', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          cache: 'no-store',
-          keepalive: true,
-        });
+        await fetchWithTimeout(
+          '/api/realtime/playhead',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            cache: 'no-store',
+            keepalive: true,
+          },
+          PLAYHEAD_POST_TIMEOUT_MS
+        );
       } catch {
-        /* best-effort */
+        /* best-effort — never leave inFlight stuck */
       }
       next = playheadQueued;
       playheadQueued = null;
@@ -95,9 +115,10 @@ export async function fetchLastPlayhead(roomId: string): Promise<{
   wallMs: number;
 } | null> {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `/api/realtime/playhead?roomId=${encodeURIComponent(roomId)}`,
-      { cache: 'no-store' }
+      { cache: 'no-store' },
+      PLAYHEAD_POST_TIMEOUT_MS
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -113,4 +134,3 @@ export async function fetchLastPlayhead(roomId: string): Promise<{
     return null;
   }
 }
-
