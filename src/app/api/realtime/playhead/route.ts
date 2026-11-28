@@ -143,7 +143,20 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, playhead: payload });
+  // Extrapolate when primary's browser throttles POSTs (common on Smart TVs)
+  let out = payload;
+  if (out && !out.paused && typeof out.wallMs === 'number' && typeof out.t === 'number') {
+    const ageMs = Date.now() - out.wallMs;
+    if (ageMs > 250 && ageMs < 180_000) {
+      out = {
+        ...out,
+        t: Math.max(0, out.t + ageMs / 1000),
+        wallMs: Date.now(),
+      };
+    }
+  }
+
+  return NextResponse.json({ ok: true, playhead: out });
 }
 
 /**

@@ -1,22 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/server/lib/supabase';
-import { clearPlayhead } from '@/server/lib/realtime-hub';
+import { clearPlayhead, publishPlayhead } from '@/server/lib/realtime-hub';
 import { query, useLocalPg } from '@/server/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-/** Drop stale playhead so secondaries do not stay Syncing on the previous entry. */
-async function clearRoomPlayhead(roomId: string) {
-  clearPlayhead(roomId);
+/** Clear or seed playhead so secondaries leave Syncing on song change without waiting on Samsung POSTs. */
+async function writeRoomPlayhead(
+  roomId: string,
+  payload: { entryId: string; t: number; paused: boolean; wallMs: number } | null
+) {
+  if (!payload) {
+    clearPlayhead(roomId);
+  } else {
+    publishPlayhead(roomId, payload as unknown as Record<string, unknown>);
+  }
   try {
     if (useLocalPg) {
-      await query(`UPDATE kara_rooms SET tv_playhead = NULL WHERE id = $1::uuid`, [roomId]);
+      await query(`UPDATE kara_rooms SET tv_playhead = $2::jsonb WHERE id = $1::uuid`, [
+        roomId,
+        payload ? JSON.stringify(payload) : null,
+      ]);
     } else {
-      await supabaseAdmin.from('kara_rooms').update({ tv_playhead: null }).eq('id', roomId);
+      await supabaseAdmin
+        .from('kara_rooms')
+        .update({ tv_playhead: payload })
+        .eq('id', roomId);
     }
   } catch (err) {
-    console.warn('[advance] clear playhead failed', err);
+    console.warn('[advance] write playhead failed', err);
   }
+}
+
+async function seedPlayheadForCurrentEntry(roomId: string) {
+  const { data: room } = await supabaseAdmin
+    .from('kara_rooms')
+    .select('current_entry_id')
+    .eq('id', roomId)
+    .maybeSingle();
+  const entryId = room?.current_entry_id;
+  if (!entryId) {
+    await writeRoomPlayhead(roomId, null);
+    return;
+  }
+  await writeRoomPlayhead(roomId, {
+    entryId,
+    t: 0,
+    paused: false,
+    wallMs: Date.now(),
+  });
 }
 
 /**
@@ -75,13 +107,13 @@ export async function POST(
         advanced = (rpcData as { advanced?: boolean }).advanced === true;
       }
 
-      // Stamp start time for secondary TV seek (idempotent if RPC already set it)
+      // Stamp start + seed playhead at t=0 (Samsung may throttle setInterval mid-song)
       if (advanced) {
-        await clearRoomPlayhead(roomId);
         await supabaseAdmin
           .from('kara_rooms')
           .update({ current_song_started_at: new Date().toISOString() })
           .eq('id', roomId);
+        await seedPlayheadForCurrentEntry(roomId);
       }
 
       return NextResponse.json({
@@ -154,7 +186,7 @@ async function inlineAdvance(roomId: string, currentEntryId: string | null) {
     .maybeSingle();
 
   if (!next) {
-    await clearRoomPlayhead(roomId);
+    await writeRoomPlayhead(roomId, null);
     await supabaseAdmin
       .from('kara_rooms')
       .update({
@@ -176,7 +208,6 @@ async function inlineAdvance(roomId: string, currentEntryId: string | null) {
     .update({ status: 'playing', started_at: new Date().toISOString() })
     .eq('id', next.id);
 
-  await clearRoomPlayhead(roomId);
   await supabaseAdmin
     .from('kara_rooms')
     .update({
@@ -185,6 +216,13 @@ async function inlineAdvance(roomId: string, currentEntryId: string | null) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', roomId);
+
+  await writeRoomPlayhead(roomId, {
+    entryId: next.id,
+    t: 0,
+    paused: false,
+    wallMs: Date.now(),
+  });
 
   console.log('[advance] Inline advanced to', next.id);
   return NextResponse.json({ success: true, advanced: true });

@@ -140,17 +140,19 @@ function TVModePageContent() {
     wallMs: number;
   };
 
-  // Gentle on Smart TV primary; secondary trails, free-runs if primary hiccups.
-  const SYNC_INTERVAL_MS = 500;
-  const FOLLOWER_POLL_MS = 400;
+  // Primary: prefer YouTube onTimeUpdate (setInterval is throttled on Samsung/streamer).
+  const SYNC_INTERVAL_MS = 2000;
+  const PRIMARY_POST_MIN_MS = 500;
+  const FOLLOWER_POLL_MS = 500;
   const FOLLOW_TRAIL_SEC = 0.2;
-  const SYNC_DRIFT_SEC = 0.75;
-  const SEEK_COOLDOWN_MS = 1500;
-  const PLAYHEAD_STALE_MS = 8000;
+  const SYNC_DRIFT_SEC = 0.85;
+  const SEEK_COOLDOWN_MS = 2000;
+  const PLAYHEAD_STALE_MS = 12000;
   const VISIBILITY_UNSYNC_MS = 2000;
 
   const hiddenAtRef = useRef<number | null>(null);
   const pollDiagAtRef = useRef(0);
+  const lastPrimaryPostAtRef = useRef(0);
   /** Playhead arrived before YouTube/HTML5 player ready — apply on ready */
   const pendingPlayheadRef = useRef<PlayheadPayload | null>(null);
 
@@ -175,18 +177,21 @@ function TVModePageContent() {
     return null;
   }, []);
 
-  const publishPrimaryPlayhead = useCallback(() => {
+  const publishPrimaryPlayhead = useCallback((force = false) => {
     if (!isPrimaryTVRef.current) return;
+    const now = Date.now();
+    if (!force && now - lastPrimaryPostAtRef.current < PRIMARY_POST_MIN_MS) return;
     const roomId = roomIdRef.current || roomRef.current?.id;
     const entryId = currentSongRef.current?.id;
     if (!roomId || !entryId) return;
     const local = readLocalPlayhead();
+    lastPrimaryPostAtRef.current = now;
     postPlayhead({
       roomId,
       entryId,
       t: local?.t ?? 0,
       paused: local?.paused ?? false,
-      wallMs: Date.now(),
+      wallMs: now,
     });
   }, [readLocalPlayhead]);
 
@@ -220,17 +225,23 @@ function TVModePageContent() {
 
     if (ageMs > PLAYHEAD_STALE_MS) {
       if (followerSyncedRef.current) {
-        if (now - pollDiagAtRef.current > 10000) {
+        if (now - pollDiagAtRef.current > 15000) {
           pollDiagAtRef.current = now;
           console.warn('[tv] Playhead stale — free-running', {
             ageMs,
             t: payload.t,
           });
         }
-        // Keep playing; do NOT black-screen (that caused permanent Syncing…)
         return;
       }
-      // Refresh while primary hiccuped: still leave Syncing at last known t, then free-run
+      // Very old packet on refresh: prefer t≈0 for current entry over jumping mid-song stale
+      if (ageMs > 45000) {
+        console.warn('[tv] Ignoring ancient playhead; waiting for seed/primary', {
+          ageMs,
+          t: payload.t,
+        });
+        return;
+      }
       console.warn('[tv] Bootstrapping from stale playhead', {
         ageMs,
         t: payload.t,
@@ -346,7 +357,7 @@ function TVModePageContent() {
   // Primary: publish immediately on song change so secondary can leave "Syncing…"
   useEffect(() => {
     if (!isPrimaryTV || !currentSong?.id || !room?.id) return;
-    publishPrimaryPlayhead();
+    publishPrimaryPlayhead(true);
   }, [isPrimaryTV, currentSong?.id, room?.id, publishPrimaryPlayhead]);
 
   // Only unsync after a real hide (≥2s), not every focus flicker
@@ -1299,6 +1310,10 @@ function TVModePageContent() {
             }}
             onStateChange={(state) => {
               ytPlayerStateRef.current = state;
+              // Primary: YT events keep firing when setInterval is throttled on Samsung
+              if (isPrimaryTVRef.current && (state === 1 || state === 2)) {
+                publishPrimaryPlayhead(true);
+              }
               // If secondary somehow starts playing before sync, force pause
               if (
                 !isPrimaryTVRef.current &&
@@ -1314,6 +1329,10 @@ function TVModePageContent() {
               }
               if (Number.isFinite(dur) && dur > 0) {
                 playerDurationRef.current = dur;
+              }
+              // Primary clock: post from media callback (survives Smart TV timer throttling)
+              if (isPrimaryTVRef.current) {
+                publishPrimaryPlayhead();
               }
               // Throttle React state updates — full TV tree re-render every 250ms kills Smart TVs
               const now = Date.now();
